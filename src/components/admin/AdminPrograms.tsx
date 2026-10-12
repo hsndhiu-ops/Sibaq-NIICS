@@ -17,9 +17,12 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
   const [editingProgram, setEditingProgram] = useState<Program | null>(null);
   const [isCreatingProgram, setIsCreatingProgram] = useState(false);
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('');
+  const [category, setCategory] = useState<string>('Stage');
   const [type, setType] = useState<'solo' | 'group'>('solo');
   const [description, setDescription] = useState('');
+
+  // Category filter
+  const [categoryFilter, setCategoryFilter] = useState<'All' | 'Stage' | 'Non-Stage' | 'Off-Stage'>('All');
 
   // Assign students to program modal
   const [assigningProgram, setAssigningProgram] = useState<any | null>(null);
@@ -56,17 +59,18 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
   const handleSaveProgram = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      const selectedCategory = category || 'Stage';
       if (editingProgram) {
-        await api.updateProgram(editingProgram.id, { name, category, type, description });
+        await api.updateProgram(editingProgram.id, { name, category: selectedCategory, type, description });
         onNotify('Program updated successfully.');
       } else {
-        await api.createProgram({ name, category, type, description });
+        await api.createProgram({ name, category: selectedCategory, type, description });
         onNotify('Program created successfully.');
       }
       setIsCreatingProgram(false);
       setEditingProgram(null);
       setName('');
-      setCategory('');
+      setCategory('Stage');
       setDescription('');
       loadData();
     } catch (err: any) {
@@ -132,6 +136,18 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
     }
   };
 
+  const filteredPrograms = programs.filter((p) => {
+    if (categoryFilter === 'All') return true;
+    return (p.category || 'Stage').toLowerCase() === categoryFilter.toLowerCase();
+  });
+
+  const getCategoryCount = (cat: 'All' | 'Stage' | 'Non-Stage' | 'Off-Stage') => {
+    if (cat === 'All') return programs.length;
+    return programs.filter(
+      (p) => (p.category || 'Stage').toLowerCase() === cat.toLowerCase()
+    ).length;
+  };
+
   return (
     <div className="space-y-6 pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -152,7 +168,7 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
             onClick={() => {
               setEditingProgram(null);
               setName('');
-              setCategory('');
+              setCategory('Stage');
               setType('solo');
               setDescription('');
               setIsCreatingProgram(true);
@@ -165,18 +181,48 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
         </div>
       </div>
 
+      {/* Category filter tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        {(['All', 'Stage', 'Non-Stage', 'Off-Stage'] as const).map((cat) => {
+          const isSelected = categoryFilter === cat;
+          const count = getCategoryCount(cat);
+          return (
+            <button
+              key={cat}
+              onClick={() => setCategoryFilter(cat)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 shrink-0 ${
+                isSelected
+                  ? 'bg-[#111111] text-white shadow-sm'
+                  : 'bg-[#F3F4F6] text-[#6B7280] hover:text-[#111111] hover:bg-gray-200'
+              }`}
+            >
+              <span>{cat === 'All' ? 'All Categories' : cat}</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  isSelected ? 'bg-white/20 text-white' : 'bg-gray-200 text-[#6B7280]'
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Program Cards */}
       {loading ? (
         <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
           Loading programs...
         </div>
-      ) : programs.length === 0 ? (
+      ) : filteredPrograms.length === 0 ? (
         <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-          No competition programs created yet.
+          {programs.length === 0
+            ? 'No competition programs created yet.'
+            : `No programs found under "${categoryFilter}".`}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {programs.map((prog) => (
+          {filteredPrograms.map((prog) => (
             <div
               key={prog.id}
               className="p-5 rounded-2xl bg-[#F3F4F6] flex flex-col justify-between space-y-3"
@@ -187,18 +233,34 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
                     <h3 className="font-bold text-base text-[#111111]">
                       {prog.name}
                     </h3>
-                    <p className="text-xs text-[#6B7280]">
-                      {prog.category} • <span className="capitalize">{prog.type}</span>
-                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ${
+                          (prog.category || 'Stage') === 'Stage'
+                            ? 'bg-purple-100 text-purple-700'
+                            : (prog.category || 'Stage') === 'Non-Stage'
+                            ? 'bg-blue-100 text-blue-700'
+                            : (prog.category || 'Stage') === 'Off-Stage'
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-gray-200 text-gray-700'
+                        }`}
+                      >
+                        {prog.category || 'Stage'}
+                      </span>
+                      <span className="text-xs text-[#9CA3AF]">•</span>
+                      <span className="text-xs text-[#6B7280] capitalize font-medium">
+                        {prog.type}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => {
                         setEditingProgram(prog);
                         setName(prog.name);
-                        setCategory(prog.category);
+                        setCategory(prog.category || 'Stage');
                         setType(prog.type);
-                        setDescription(prog.description);
+                        setDescription(prog.description || '');
                         setIsCreatingProgram(true);
                       }}
                       className="p-1.5 rounded-lg bg-white text-[#111111] hover:bg-gray-100"
@@ -217,7 +279,7 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
                 </div>
 
                 {prog.description && (
-                  <p className="text-xs text-[#6B7280] mt-1.5 leading-relaxed">
+                  <p className="text-xs text-[#6B7280] mt-2 leading-relaxed">
                     {prog.description}
                   </p>
                 )}
@@ -291,14 +353,19 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
                   Category
                 </label>
-                <input
-                  type="text"
+                <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  placeholder="e.g. Stage, Non Stage , Off Stage"
                   required
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
-                />
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0 focus:outline-none focus:ring-2 focus:ring-[#EF4B47]/20 cursor-pointer"
+                >
+                  <option value="Stage">Stage</option>
+                  <option value="Non-Stage">Non-Stage</option>
+                  <option value="Off-Stage">Off-Stage</option>
+                  {category && !['Stage', 'Non-Stage', 'Off-Stage'].includes(category) && (
+                    <option value={category}>{category}</option>
+                  )}
+                </select>
               </div>
 
               <div>

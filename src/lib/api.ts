@@ -545,7 +545,7 @@ export const api = {
         .map((p: any) => ({
           id: p[PROGRAMS_COLS.ID],
           name: p[PROGRAMS_COLS.NAME],
-          category: p[PROGRAMS_COLS.KIND] || '',
+          category: p.category || p[PROGRAMS_COLS.CATEGORY] || p[PROGRAMS_COLS.KIND] || 'Stage',
           type: p[PROGRAMS_COLS.KIND] === 'group' ? 'group' : 'solo',
           description: p[PROGRAMS_COLS.DESCRIPTION] || '',
           createdAt: p[PROGRAMS_COLS.CREATED_AT],
@@ -788,7 +788,7 @@ export const api = {
           list.push({
             id: prog[PROGRAMS_COLS.ID],
             name: prog[PROGRAMS_COLS.NAME],
-            category: prog[PROGRAMS_COLS.KIND] || '',
+            category: prog.category || prog[PROGRAMS_COLS.CATEGORY] || prog[PROGRAMS_COLS.KIND] || 'Stage',
             type: prog[PROGRAMS_COLS.KIND] === 'group' ? 'group' : 'solo',
             description: prog[PROGRAMS_COLS.DESCRIPTION] || '',
             createdAt: prog[PROGRAMS_COLS.CREATED_AT],
@@ -1425,7 +1425,7 @@ export const api = {
       .map((p: any) => ({
         id: p[PROGRAMS_COLS.ID],
         name: p[PROGRAMS_COLS.NAME],
-        category: p[PROGRAMS_COLS.KIND] || '',
+        category: p.category || p[PROGRAMS_COLS.CATEGORY] || p[PROGRAMS_COLS.KIND] || 'Stage',
         type: p[PROGRAMS_COLS.KIND] === 'group' ? 'group' : 'solo',
         description: p[PROGRAMS_COLS.DESCRIPTION] || '',
         createdAt: p[PROGRAMS_COLS.CREATED_AT],
@@ -1653,7 +1653,7 @@ export const api = {
       return {
         id: p[PROGRAMS_COLS.ID],
         name: p[PROGRAMS_COLS.NAME],
-        category: p[PROGRAMS_COLS.KIND] || '',
+        category: p.category || p[PROGRAMS_COLS.CATEGORY] || p[PROGRAMS_COLS.KIND] || 'Stage',
         type: p[PROGRAMS_COLS.KIND] === 'group' ? 'group' : 'solo',
         description: p[PROGRAMS_COLS.DESCRIPTION] || '',
         createdAt: p[PROGRAMS_COLS.CREATED_AT],
@@ -1666,25 +1666,52 @@ export const api = {
   },
 
   createProgram: async (data: { name: string; category?: string; type: 'solo' | 'group'; description?: string }): Promise<{ program: Program }> => {
-    const { data: created, error } = await supabase
+    const payload: Record<string, any> = {
+      [PROGRAMS_COLS.NAME]: data.name,
+      [PROGRAMS_COLS.KIND]: data.type,
+      [PROGRAMS_COLS.DESCRIPTION]: data.description || '',
+    };
+    if (data.category) {
+      payload[PROGRAMS_COLS.CATEGORY] = data.category;
+    }
+
+    let created: any = null;
+    let error: any = null;
+
+    const res = await supabase
       .from(TABLES.PROGRAMS)
-      .insert({
-        [PROGRAMS_COLS.NAME]: data.name,
-        [PROGRAMS_COLS.KIND]: data.type,
-        [PROGRAMS_COLS.DESCRIPTION]: data.description || '',
-      })
+      .insert(payload)
       .select()
       .single();
 
+    if (res.error && (res.error.message?.includes('category') || res.error.message?.includes('column') || res.error.code === 'PGRST204')) {
+      // Column might not exist yet in Supabase schema cache; retry without it
+      const fallbackPayload = {
+        [PROGRAMS_COLS.NAME]: data.name,
+        [PROGRAMS_COLS.KIND]: data.type,
+        [PROGRAMS_COLS.DESCRIPTION]: data.description || '',
+      };
+      const fallbackRes = await supabase
+        .from(TABLES.PROGRAMS)
+        .insert(fallbackPayload)
+        .select()
+        .single();
+      created = fallbackRes.data;
+      error = fallbackRes.error;
+    } else {
+      created = res.data;
+      error = res.error;
+    }
+
     if (error || !created) {
-      throw new Error("Couldn't create program. Try again.");
+      throw new Error(error?.message || "Couldn't create program. Try again.");
     }
 
     return {
       program: {
         id: created[PROGRAMS_COLS.ID],
         name: created[PROGRAMS_COLS.NAME],
-        category: created[PROGRAMS_COLS.KIND] || '',
+        category: created.category || created[PROGRAMS_COLS.CATEGORY] || data.category || 'Stage',
         type: created[PROGRAMS_COLS.KIND] === 'group' ? 'group' : 'solo',
         description: created[PROGRAMS_COLS.DESCRIPTION] || '',
         createdAt: created[PROGRAMS_COLS.CREATED_AT],
@@ -1700,23 +1727,42 @@ export const api = {
     if (data.name !== undefined) updatePayload[PROGRAMS_COLS.NAME] = data.name;
     if (data.type !== undefined) updatePayload[PROGRAMS_COLS.KIND] = data.type;
     if (data.description !== undefined) updatePayload[PROGRAMS_COLS.DESCRIPTION] = data.description;
+    if (data.category !== undefined) updatePayload[PROGRAMS_COLS.CATEGORY] = data.category;
 
-    const { data: updated, error } = await supabase
+    let updated: any = null;
+    let error: any = null;
+
+    const res = await supabase
       .from(TABLES.PROGRAMS)
       .update(updatePayload)
       .eq(PROGRAMS_COLS.ID, id)
       .select()
       .single();
 
+    if (res.error && (res.error.message?.includes('category') || res.error.message?.includes('column') || res.error.code === 'PGRST204')) {
+      delete updatePayload[PROGRAMS_COLS.CATEGORY];
+      const fallbackRes = await supabase
+        .from(TABLES.PROGRAMS)
+        .update(updatePayload)
+        .eq(PROGRAMS_COLS.ID, id)
+        .select()
+        .single();
+      updated = fallbackRes.data;
+      error = fallbackRes.error;
+    } else {
+      updated = res.data;
+      error = res.error;
+    }
+
     if (error || !updated) {
-      throw new Error("Couldn't update program. Try again.");
+      throw new Error(error?.message || "Couldn't update program. Try again.");
     }
 
     return {
       program: {
         id: updated[PROGRAMS_COLS.ID],
         name: updated[PROGRAMS_COLS.NAME],
-        category: updated[PROGRAMS_COLS.KIND] || '',
+        category: updated.category || updated[PROGRAMS_COLS.CATEGORY] || data.category || 'Stage',
         type: updated[PROGRAMS_COLS.KIND] === 'group' ? 'group' : 'solo',
         description: updated[PROGRAMS_COLS.DESCRIPTION] || '',
         createdAt: updated[PROGRAMS_COLS.CREATED_AT],

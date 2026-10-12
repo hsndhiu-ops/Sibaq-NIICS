@@ -35,11 +35,12 @@ export const PROFILES_COLS = {
 } as const;
 
 // Programs Columns
-// type -> kind; category removed
+// type -> kind; category stored in category column
 export const PROGRAMS_COLS = {
   ID: 'id',
   NAME: 'name',
   KIND: 'kind',
+  CATEGORY: 'category',
   DESCRIPTION: 'description',
   CREATED_AT: 'created_at',
 } as const;

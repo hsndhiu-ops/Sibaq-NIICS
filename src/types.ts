@@ -21,10 +21,12 @@ export interface User {
   createdAt: string;
 }
 
+export type ProgramCategory = 'Stage' | 'Non-Stage' | 'Off-Stage' | string;
+
 export interface Program {
   id: string;
   name: string;
-  category: string;
+  category: ProgramCategory;
   type: 'solo' | 'group';
   description: string;
   createdAt: string;
