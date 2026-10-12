@@ -13,6 +13,7 @@ import fileRouter from './server/routes/fileRouter';
 import createUserHandler from './api/create-user';
 import resetPasswordHandler from './api/reset-password';
 import updateUserHandler from './api/update-user';
+import purgeScreenshotsHandler from './api/purge-screenshots';
 import {
   startBackgroundJobs,
   runMidnightAbsentJob,
@@ -48,6 +49,8 @@ async function startServer() {
   app.post('/api/create-user', createUserHandler);
   app.post('/api/reset-password', resetPasswordHandler);
   app.post('/api/update-user', updateUserHandler);
+  app.all('/api/purge-screenshots', purgeScreenshotsHandler);
+  app.all('/api/admin/purge-screenshots', purgeScreenshotsHandler);
 
   // Cron trigger endpoint for external invocation or admin testing
   app.post('/api/cron/trigger', (req: any, res) => {

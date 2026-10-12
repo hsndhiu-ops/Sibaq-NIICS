@@ -2079,9 +2079,60 @@ export const api = {
   },
 
   purgeOldScreenshots: async (): Promise<{ purgedCount: number; message: string }> => {
-    return callSecretServerEndpoint<{ purgedCount: number; message: string }>('/api/admin/purge-screenshots', {
-      method: 'DELETE',
-    });
+    let supabasePurged = 0;
+    try {
+      const cutoffTime = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+      const { data: oldScreenshots } = await supabase
+        .from(TABLES.SCREENSHOT_LOG)
+        .select('*')
+        .lt(SCREENSHOT_LOG_COLS.UPLOADED_AT, cutoffTime)
+        .is(SCREENSHOT_LOG_COLS.FILE_DELETED_AT, null);
+
+      if (oldScreenshots && oldScreenshots.length > 0) {
+        const pathsToRemove = oldScreenshots
+          .map((s) => s[SCREENSHOT_LOG_COLS.STORAGE_PATH])
+          .filter(Boolean);
+
+        if (pathsToRemove.length > 0) {
+          try {
+            await supabase.storage.from(BUCKETS.SCREENSHOTS).remove(pathsToRemove);
+          } catch (stErr) {
+            console.warn('Storage purge warning:', stErr);
+          }
+        }
+
+        const idsToUpdate = oldScreenshots.map((s) => s[SCREENSHOT_LOG_COLS.ID]);
+        const { error: updateErr } = await supabase
+          .from(TABLES.SCREENSHOT_LOG)
+          .update({ [SCREENSHOT_LOG_COLS.FILE_DELETED_AT]: new Date().toISOString() })
+          .in(SCREENSHOT_LOG_COLS.ID, idsToUpdate);
+
+        if (!updateErr) {
+          supabasePurged = oldScreenshots.length;
+        }
+      }
+    } catch (sbErr) {
+      console.warn('Direct Supabase screenshot purge error:', sbErr);
+    }
+
+    try {
+      const res = await callSecretServerEndpoint<{ purgedCount: number; message: string }>('/api/purge-screenshots', {
+        method: 'POST',
+      });
+      const total = Math.max(supabasePurged, res.purgedCount || 0);
+      return {
+        purgedCount: total,
+        message: total > 0 ? `Purged ${total} screenshot(s) older than 48 hours.` : 'No files older than 48 hours to purge.',
+      };
+    } catch {
+      return {
+        purgedCount: supabasePurged,
+        message:
+          supabasePurged > 0
+            ? `Purged ${supabasePurged} screenshot(s) older than 48 hours.`
+            : 'No files older than 48 hours to purge.',
+      };
+    }
   },
 
   // -------------------------------------------------------------

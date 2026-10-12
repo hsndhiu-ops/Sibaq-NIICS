@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { AuditLogEntry } from '../../types';
 import { api } from '../../api';
-import { Download, FileSpreadsheet, Shield } from 'lucide-react';
+import { Download, FileSpreadsheet, Shield, Loader2 } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export const AdminAuditLog: React.FC = () => {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
@@ -23,8 +24,38 @@ export const AdminAuditLog: React.FC = () => {
     }
   };
 
-  const handleExportExcel = () => {
-    window.location.href = '/api/admin/export-excel';
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportExcel = async () => {
+    setExporting(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token || '';
+
+      const res = await fetch('/api/admin/export-excel', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+
+      if (!res.ok) {
+        throw new Error(`Export request failed (${res.status})`);
+      }
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `sibaq_master_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token || '';
+      window.location.href = `/api/admin/export-excel?token=${encodeURIComponent(token)}`;
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -41,10 +72,15 @@ export const AdminAuditLog: React.FC = () => {
 
         <button
           onClick={handleExportExcel}
-          className="px-4 py-2 rounded-xl bg-[#111111] text-white text-xs font-semibold hover:bg-black flex items-center gap-1.5 shrink-0"
+          disabled={exporting}
+          className="px-4 py-2 rounded-xl bg-[#111111] text-white text-xs font-semibold hover:bg-black flex items-center gap-1.5 shrink-0 disabled:opacity-50"
         >
-          <FileSpreadsheet className="w-4 h-4 text-[#EF4B47]" />
-          <span>Export Excel (.xlsx)</span>
+          {exporting ? (
+            <Loader2 className="w-4 h-4 text-[#EF4B47] animate-spin" />
+          ) : (
+            <FileSpreadsheet className="w-4 h-4 text-[#EF4B47]" />
+          )}
+          <span>{exporting ? 'Generating Excel...' : 'Export Excel (.xlsx)'}</span>
         </button>
       </div>
 
