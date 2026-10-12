@@ -10,6 +10,9 @@ import studentRouter from './server/routes/studentRouter';
 import leaderboardRouter from './server/routes/leaderboardRouter';
 import notificationRouter from './server/routes/notificationRouter';
 import fileRouter from './server/routes/fileRouter';
+import createUserHandler from './api/create-user';
+import resetPasswordHandler from './api/reset-password';
+import updateUserHandler from './api/update-user';
 import {
   startBackgroundJobs,
   runMidnightAbsentJob,
@@ -40,6 +43,11 @@ async function startServer() {
   app.use('/api/leaderboard', leaderboardRouter);
   app.use('/api/notifications', notificationRouter);
   app.use('/api/files', fileRouter);
+
+  // Vercel serverless function equivalent routes
+  app.post('/api/create-user', createUserHandler);
+  app.post('/api/reset-password', resetPasswordHandler);
+  app.post('/api/update-user', updateUserHandler);
 
   // Cron trigger endpoint for external invocation or admin testing
   app.post('/api/cron/trigger', (req: any, res) => {

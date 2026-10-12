@@ -13,6 +13,10 @@ import {
   ChevronUp,
   RotateCcw,
   AlertCircle,
+  ExternalLink,
+  Loader2,
+  ZoomIn,
+  ZoomOut,
 } from 'lucide-react';
 
 interface AdminStudentDrillDownProps {
@@ -42,6 +46,50 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
   // Screenshot viewer modal
   const [viewingScreenshotId, setViewingScreenshotId] = useState<string | null>(null);
+  const [resolvedScreenshotUrl, setResolvedScreenshotUrl] = useState<string | null>(null);
+  const [screenshotLoading, setScreenshotLoading] = useState(true);
+  const [screenshotError, setScreenshotError] = useState(false);
+  const [isScreenshotZoomed, setIsScreenshotZoomed] = useState(false);
+
+  useEffect(() => {
+    if (!viewingScreenshotId) {
+      setResolvedScreenshotUrl(null);
+      setScreenshotLoading(false);
+      setScreenshotError(false);
+      setIsScreenshotZoomed(false);
+      return;
+    }
+
+    setScreenshotLoading(true);
+    setScreenshotError(false);
+    setIsScreenshotZoomed(false);
+
+    if (
+      viewingScreenshotId.startsWith('http://') ||
+      viewingScreenshotId.startsWith('https://') ||
+      viewingScreenshotId.startsWith('data:') ||
+      viewingScreenshotId.startsWith('blob:')
+    ) {
+      setResolvedScreenshotUrl(viewingScreenshotId);
+      return;
+    }
+
+    let cancelled = false;
+    api
+      .resolveScreenshotUrl(viewingScreenshotId)
+      .then((url) => {
+        if (!cancelled) setResolvedScreenshotUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setResolvedScreenshotUrl(`/api/files/download/${encodeURIComponent(viewingScreenshotId)}`);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [viewingScreenshotId]);
 
   // Admin task review action state
   const [reviewTask, setReviewTask] = useState<TaskRecord | null>(null);
@@ -394,7 +442,11 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                       {task.attachmentFileId && (
                         <div className="pt-0.5">
                           <a
-                            href={`/api/files/download/${task.attachmentFileId}`}
+                            href={
+                              task.attachmentFileId.startsWith('http')
+                                ? task.attachmentFileId
+                                : `/api/files/download/${task.attachmentFileId}`
+                            }
                             download
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-xs font-medium text-[#111111] hover:bg-gray-100 transition-colors max-w-full truncate"
                           >
@@ -419,7 +471,11 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
                           {task.submissionFileId && (
                             <a
-                              href={`/api/files/download/${task.submissionFileId}`}
+                              href={
+                                task.submissionFileId.startsWith('http')
+                                  ? task.submissionFileId
+                                  : `/api/files/download/${task.submissionFileId}`
+                              }
                               download
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F3F4F6] text-xs font-semibold text-[#D93F3B] hover:bg-gray-200 transition-colors max-w-full truncate"
                             >
@@ -543,25 +599,104 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
       {/* Screenshot Review Modal */}
       {viewingScreenshotId && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 p-3 sm:p-4">
-          <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-3 border-b border-[#F3F4F6] flex items-center justify-between">
+        <div
+          className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 p-3 sm:p-4"
+          onClick={() => setViewingScreenshotId(null)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-xl max-h-[90vh] sm:max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-3 border-b border-[#F3F4F6] flex items-center justify-between gap-2 bg-white">
               <span className="text-xs font-semibold text-[#111111] truncate pr-2">
                 {student.fullName} • Screen Time Screenshot
               </span>
-              <button
-                onClick={() => setViewingScreenshotId(null)}
-                className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 shrink-0"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1 shrink-0">
+                {resolvedScreenshotUrl && !screenshotError && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setIsScreenshotZoomed(!isScreenshotZoomed)}
+                      className="p-1.5 rounded-lg text-[#6B7280] hover:text-[#111111] hover:bg-[#F3F4F6] transition-colors"
+                      title={isScreenshotZoomed ? 'Fit to screen' : 'Zoom in to inspect'}
+                    >
+                      {isScreenshotZoomed ? (
+                        <ZoomOut className="w-4 h-4" />
+                      ) : (
+                        <ZoomIn className="w-4 h-4" />
+                      )}
+                    </button>
+                    <a
+                      href={resolvedScreenshotUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-lg text-[#6B7280] hover:text-[#111111] hover:bg-[#F3F4F6] transition-colors"
+                      title="Open full image in new tab"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  </>
+                )}
+                <button
+                  onClick={() => setViewingScreenshotId(null)}
+                  className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 shrink-0"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
-            <div className="p-3 sm:p-4 flex-1 overflow-auto flex items-center justify-center bg-gray-50">
-              <img
-                src={`/api/files/download/${viewingScreenshotId}`}
-                alt="Student screen time verification"
-                className="max-h-[70vh] w-auto rounded-xl object-contain shadow-sm"
-              />
+            <div className="p-3 sm:p-4 flex-1 overflow-auto flex items-center justify-center bg-[#F9FAFB] min-h-[260px] relative">
+              {screenshotLoading && !screenshotError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#F9FAFB]/80 z-10">
+                  <Loader2 className="w-6 h-6 animate-spin text-[#EF4B47]" />
+                  <span className="text-xs text-[#6B7280] font-medium">
+                    Loading screenshot image...
+                  </span>
+                </div>
+              )}
+
+              {screenshotError ? (
+                <div className="p-6 max-w-sm text-center space-y-3">
+                  <div className="w-10 h-10 rounded-full bg-red-50 text-[#EF4B47] flex items-center justify-center mx-auto">
+                    <AlertCircle className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-[#111111]">
+                      Unable to display screenshot
+                    </h4>
+                    <p className="text-xs text-[#6B7280] mt-1 leading-relaxed">
+                      Image could not be retrieved from storage. It may have been
+                      purged after the 48-hour privacy window.
+                    </p>
+                  </div>
+                  {resolvedScreenshotUrl && (
+                    <a
+                      href={resolvedScreenshotUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block px-3 py-1.5 rounded-xl bg-[#EF4B47] text-xs font-semibold text-white hover:opacity-95"
+                    >
+                      Open direct link
+                    </a>
+                  )}
+                </div>
+              ) : resolvedScreenshotUrl ? (
+                <img
+                  src={resolvedScreenshotUrl}
+                  alt="Student screen time verification"
+                  onLoad={() => setScreenshotLoading(false)}
+                  onError={() => {
+                    setScreenshotLoading(false);
+                    setScreenshotError(true);
+                  }}
+                  onClick={() => setIsScreenshotZoomed(!isScreenshotZoomed)}
+                  className={`rounded-xl object-contain shadow-sm transition-all select-none ${
+                    isScreenshotZoomed
+                      ? 'max-h-none max-w-none w-auto cursor-zoom-out'
+                      : 'max-h-[70vh] w-auto max-w-full cursor-zoom-in'
+                  }`}
+                />
+              ) : null}
             </div>
           </div>
         </div>

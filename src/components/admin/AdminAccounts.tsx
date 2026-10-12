@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User } from '../../types';
 import { api } from '../../api';
 import { Plus, Key, Edit, X, UserPlus } from 'lucide-react';
+import { CreateUserModal } from './CreateUserModal';
 
 interface AdminAccountsProps {
   onNotify: (msg: string) => void;
@@ -16,14 +17,6 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
 
   // Create account modal
   const [isCreating, setIsCreating] = useState(false);
-  const [newUsername, setNewUsername] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [newRole, setNewRole] = useState<'guide' | 'student'>('student');
-  const [newFullName, setNewFullName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newGuideId, setNewGuideId] = useState('');
-  const [createSaving, setCreateSaving] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
 
   // Reset password modal
   const [resetTargetUser, setResetTargetUser] = useState<User | null>(null);
@@ -57,39 +50,13 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
     }
   };
 
-  const handleCreateAccount = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setCreateSaving(true);
-    setCreateError(null);
-
-    try {
-      await api.createAccount({
-        username: newUsername,
-        password: newPassword,
-        role: newRole,
-        fullName: newFullName,
-        email: newEmail || null,
-        guideId: newRole === 'student' && newGuideId ? newGuideId : null,
-      });
-
-      setIsCreating(false);
-      setNewUsername('');
-      setNewPassword('');
-      setNewFullName('');
-      setNewEmail('');
-      setNewGuideId('');
-      onNotify('Account created successfully.');
-      loadAccounts();
-    } catch (err: any) {
-      setCreateError(err.message || 'Not available yet');
-    } finally {
-      setCreateSaving(false);
-    }
-  };
-
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetTargetUser || !resetPasswordVal) return;
+    if (resetPasswordVal.length < 6) {
+      setResetError('Password must be at least 6 characters long.');
+      return;
+    }
     setResetSaving(true);
     setResetError(null);
 
@@ -99,7 +66,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
       setResetPasswordVal('');
       onNotify(`Password reset for ${resetTargetUser.fullName}.`);
     } catch (err: any) {
-      setResetError(err.message || 'Not available yet');
+      setResetError(err.message || 'Failed to reset password. Please check server configuration.');
     } finally {
       setResetSaving(false);
     }
@@ -108,13 +75,17 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
   const handleEditUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editTargetUser) return;
+    if (!editFullName.trim()) {
+      setEditError('Full name is required.');
+      return;
+    }
     setEditSaving(true);
     setEditError(null);
 
     try {
       await api.updateAccount(editTargetUser.id, {
-        fullName: editFullName,
-        email: editEmail || null,
+        fullName: editFullName.trim(),
+        email: editEmail ? editEmail.trim() : null,
         guideId: editTargetUser.role === 'student' ? editGuideId || null : undefined,
       });
       setEditTargetUser(null);
@@ -152,10 +123,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
         </div>
 
         <button
-          onClick={() => {
-            setCreateError(null);
-            setIsCreating(true);
-          }}
+          onClick={() => setIsCreating(true)}
           className="px-3.5 py-2 rounded-xl bg-[#EF4B47] text-white text-xs font-semibold hover:opacity-95 flex items-center gap-1.5"
         >
           <UserPlus className="w-4 h-4" />
@@ -267,151 +235,13 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
       )}
 
       {/* Create Account Modal */}
-      {isCreating && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
-            <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
-              <h3 className="font-bold text-base text-[#111111]">
-                Create User Account
-              </h3>
-              <button
-                onClick={() => setIsCreating(false)}
-                className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateAccount} className="p-5 space-y-4 overflow-y-auto">
-              <div>
-                <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Role
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewRole('student')}
-                    className={`py-2 rounded-xl text-xs font-semibold ${
-                      newRole === 'student'
-                        ? 'bg-[#EF4B47] text-white'
-                        : 'bg-[#F3F4F6] text-[#111111]'
-                    }`}
-                  >
-                    Student
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewRole('guide')}
-                    className={`py-2 rounded-xl text-xs font-semibold ${
-                      newRole === 'guide'
-                        ? 'bg-[#EF4B47] text-white'
-                        : 'bg-[#F3F4F6] text-[#111111]'
-                    }`}
-                  >
-                    Guide
-                  </button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Full name
-                </label>
-                <input
-                  type="text"
-                  value={newFullName}
-                  onChange={(e) => setNewFullName(e.target.value)}
-                  placeholder="e.g. Ahmad Shafi"
-                  required
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Username / Roll ID
-                </label>
-                <input
-                  type="text"
-                  value={newUsername}
-                  onChange={(e) => setNewUsername(e.target.value)}
-                  placeholder="e.g. DH2401 or u_guide1"
-                  required
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Initial password
-                </label>
-                <input
-                  type="password"
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Set first password"
-                  required
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Gmail address (optional)
-                </label>
-                <input
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="student@gmail.com"
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
-                />
-              </div>
-
-              {newRole === 'student' && (
-                <div>
-                  <label className="block text-xs font-semibold text-[#111111] mb-1">
-                    Assign guide (optional)
-                  </label>
-                  <select
-                    value={newGuideId}
-                    onChange={(e) => setNewGuideId(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
-                  >
-                    <option value="">Unassigned</option>
-                    {guides.map((g) => (
-                      <option key={g.id} value={g.id}>
-                        {g.fullName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {createError && (
-                <p className="text-xs text-[#111111] font-medium">{createError}</p>
-              )}
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreating(false)}
-                  className="px-4 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={createSaving}
-                  className="px-4 py-2 rounded-xl bg-[#EF4B47] text-white text-xs font-semibold hover:opacity-95 disabled:opacity-50"
-                >
-                  {createSaving ? 'Creating...' : 'Create account'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <CreateUserModal
+        isOpen={isCreating}
+        onClose={() => setIsCreating(false)}
+        onSuccess={loadAccounts}
+        onNotify={onNotify}
+        guides={guides}
+      />
 
       {/* Reset Password Modal */}
       {resetTargetUser && (
@@ -436,15 +266,25 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
 
             <form onSubmit={handleResetPassword} className="p-5 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  New password
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-[#111111]">
+                    New password
+                  </label>
+                  <span className="text-[11px] text-[#6B7280]">
+                    Min. 6 characters
+                  </span>
+                </div>
                 <input
                   type="password"
                   value={resetPasswordVal}
-                  onChange={(e) => setResetPasswordVal(e.target.value)}
-                  placeholder="Enter new password"
+                  onChange={(e) => {
+                    setResetPasswordVal(e.target.value);
+                    if (resetError) setResetError(null);
+                  }}
+                  placeholder="Enter at least 6 characters"
                   required
+                  minLength={6}
+                  disabled={resetSaving}
                   className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
                 />
               </div>
@@ -459,7 +299,8 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                 <button
                   type="button"
                   onClick={() => setResetTargetUser(null)}
-                  className="px-4 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111]"
+                  disabled={resetSaving}
+                  className="px-4 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111] disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -505,9 +346,13 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                 <input
                   type="text"
                   value={editFullName}
-                  onChange={(e) => setEditFullName(e.target.value)}
+                  onChange={(e) => {
+                    setEditFullName(e.target.value);
+                    if (editError) setEditError(null);
+                  }}
                   required
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
+                  disabled={editSaving}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0 disabled:opacity-60"
                 />
               </div>
 
@@ -518,9 +363,13 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                 <input
                   type="email"
                   value={editEmail}
-                  onChange={(e) => setEditEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEditEmail(e.target.value);
+                    if (editError) setEditError(null);
+                  }}
                   placeholder="student@gmail.com"
-                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
+                  disabled={editSaving}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0 disabled:opacity-60"
                 />
               </div>
 
@@ -531,8 +380,12 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                   </label>
                   <select
                     value={editGuideId}
-                    onChange={(e) => setEditGuideId(e.target.value)}
-                    className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0"
+                    onChange={(e) => {
+                      setEditGuideId(e.target.value);
+                      if (editError) setEditError(null);
+                    }}
+                    disabled={editSaving}
+                    className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border-0 disabled:opacity-60"
                   >
                     <option value="">Unassigned</option>
                     {guides.map((g) => (
@@ -554,7 +407,8 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                 <button
                   type="button"
                   onClick={() => setEditTargetUser(null)}
-                  className="px-4 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111]"
+                  disabled={editSaving}
+                  className="px-4 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111] disabled:opacity-50"
                 >
                   Cancel
                 </button>

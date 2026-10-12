@@ -248,20 +248,20 @@ async function callSecretServerEndpoint<T>(endpoint: string, options: RequestIni
     }
 
     const response = await fetch(endpoint, { ...options, headers });
-    if (response.status === 404 || response.status === 501) {
-      throw new Error('Not available yet');
-    }
-
     const data = await response.json().catch(() => ({}));
+
     if (!response.ok) {
-      throw new Error(data.error || 'Not available yet');
+      if (response.status === 404 || response.status === 501) {
+        throw new Error(data.error || 'Endpoint not available on this server');
+      }
+      throw new Error(data.error || `Request failed (${response.status})`);
     }
     return data as T;
   } catch (err: any) {
     if (err.message && err.message !== 'Failed to fetch') {
       throw err;
     }
-    throw new Error('Not available yet');
+    throw new Error('Network error or server unreachable');
   }
 }
 
@@ -1552,10 +1552,19 @@ export const api = {
     fullName: string;
     email?: string | null;
     guideId?: string | null;
+    notificationEmail?: string | null;
+    assignedGuideId?: string | null;
   }): Promise<{ user: User }> => {
-    return callSecretServerEndpoint<{ user: User }>('/api/admin/create-user', {
+    return callSecretServerEndpoint<{ user: User }>('/api/create-user', {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({
+        username: data.username,
+        password: data.password,
+        role: data.role,
+        fullName: data.fullName,
+        notificationEmail: data.notificationEmail ?? data.email ?? null,
+        assignedGuideId: data.assignedGuideId ?? data.guideId ?? null,
+      }),
     });
   },
 
@@ -1563,28 +1572,48 @@ export const api = {
     id: string,
     data: { fullName?: string; email?: string | null; guideId?: string | null; username?: string }
   ): Promise<{ user: User }> => {
-    const updatePayload: Record<string, any> = {};
-    if (data.fullName !== undefined) updatePayload[PROFILES_COLS.FULL_NAME] = data.fullName;
-    if (data.email !== undefined) updatePayload[PROFILES_COLS.NOTIFICATION_EMAIL] = data.email;
-    if (data.guideId !== undefined) updatePayload[PROFILES_COLS.GUIDE_ID] = data.guideId;
-    if (data.username !== undefined) updatePayload[PROFILES_COLS.USERNAME] = data.username;
+    try {
+      const res = await callSecretServerEndpoint<{ success: boolean; user: any }>('/api/update-user', {
+        method: 'POST',
+        body: JSON.stringify({
+          userId: id,
+          fullName: data.fullName,
+          email: data.email,
+          guideId: data.guideId,
+          username: data.username,
+        }),
+      });
+      return { user: res.user };
+    } catch (serverErr: any) {
+      // If serverless endpoint threw an explicit error message, propagate it
+      if (serverErr.message && !serverErr.message.includes('Endpoint not available') && !serverErr.message.includes('Network error')) {
+        throw serverErr;
+      }
 
-    const { data: updated, error } = await supabase
-      .from(TABLES.PROFILES)
-      .update(updatePayload)
-      .eq(PROFILES_COLS.ID, id)
-      .select()
-      .single();
+      // Fallback: try direct client update (if permitted by policy)
+      const updatePayload: Record<string, any> = {};
+      if (data.fullName !== undefined) updatePayload[PROFILES_COLS.FULL_NAME] = data.fullName;
+      if (data.email !== undefined) updatePayload[PROFILES_COLS.NOTIFICATION_EMAIL] = data.email;
+      if (data.guideId !== undefined) updatePayload[PROFILES_COLS.GUIDE_ID] = data.guideId;
+      if (data.username !== undefined) updatePayload[PROFILES_COLS.USERNAME] = data.username;
 
-    if (error || !updated) {
-      throw new Error("Couldn't update account. Try again.");
+      const { data: updated, error } = await supabase
+        .from(TABLES.PROFILES)
+        .update(updatePayload)
+        .eq(PROFILES_COLS.ID, id)
+        .select()
+        .single();
+
+      if (error || !updated) {
+        throw new Error(serverErr.message || error?.message || "Couldn't update account. Try again.");
+      }
+
+      return { user: mapProfileToUser(updated) };
     }
-
-    return { user: mapProfileToUser(updated) };
   },
 
   resetPassword: async (id: string, newPassword: string): Promise<{ success: boolean; message: string }> => {
-    return callSecretServerEndpoint<{ success: boolean; message: string }>('/api/admin/reset-password', {
+    return callSecretServerEndpoint<{ success: boolean; message: string }>('/api/reset-password', {
       method: 'POST',
       body: JSON.stringify({ userId: id, newPassword }),
     });
@@ -2014,6 +2043,39 @@ export const api = {
     }
 
     return { screenshots, date };
+  },
+
+  resolveScreenshotUrl: async (pathOrUrl?: string | null): Promise<string> => {
+    if (!pathOrUrl) return '';
+    if (
+      pathOrUrl.startsWith('http://') ||
+      pathOrUrl.startsWith('https://') ||
+      pathOrUrl.startsWith('data:') ||
+      pathOrUrl.startsWith('blob:')
+    ) {
+      return pathOrUrl;
+    }
+
+    try {
+      const { data: signed, error: signErr } = await supabase.storage
+        .from(BUCKETS.SCREENSHOTS)
+        .createSignedUrl(pathOrUrl, 3600);
+      if (signed?.signedUrl) return signed.signedUrl;
+      if (signErr) console.warn('Supabase createSignedUrl error:', signErr.message);
+    } catch (e) {
+      console.warn('Failed to sign screenshot URL:', e);
+    }
+
+    try {
+      const { data: pub } = supabase.storage
+        .from(BUCKETS.SCREENSHOTS)
+        .getPublicUrl(pathOrUrl);
+      if (pub?.publicUrl) return pub.publicUrl;
+    } catch {
+      // ignore
+    }
+
+    return `/api/files/download/${encodeURIComponent(pathOrUrl)}`;
   },
 
   purgeOldScreenshots: async (): Promise<{ purgedCount: number; message: string }> => {

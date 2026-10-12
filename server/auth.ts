@@ -46,12 +46,16 @@ export function authMiddleware(
   res: Response,
   next: NextFunction
 ) {
+  let token = (req.query.token as string) || '';
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    token = authHeader.split(' ')[1];
+  }
+
+  if (!token) {
     return next();
   }
 
-  const token = authHeader.split(' ')[1];
   const session = getSession(token);
   if (!session) {
     return next();

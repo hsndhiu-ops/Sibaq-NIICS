@@ -2,8 +2,17 @@ import { Router } from 'express';
 import * as XLSX from 'xlsx';
 import { db, getKolkataDateString, getPreviousDateString } from '../db';
 import { requireAdmin, AuthenticatedRequest } from '../auth';
+import createUserHandler from '../../api/create-user';
+import resetPasswordHandler from '../../api/reset-password';
+import updateUserHandler from '../../api/update-user';
 
 const router = Router();
+
+// Mount serverless endpoints with direct handler support
+router.post('/create-user', createUserHandler);
+router.post('/reset-password', resetPasswordHandler);
+router.post('/update-user', updateUserHandler);
+
 router.use(requireAdmin);
 
 // Today overview & date picker data
