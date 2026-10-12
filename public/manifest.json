@@ -1,0 +1,21 @@
+{
+  "short_name": "DHIU Arts Fest",
+  "name": "DHIU Arts Fest Preparation Tracker",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#FFFFFF",
+  "theme_color": "#EF4B47",
+  "display": "standalone",
+  "orientation": "portrait"
+}
