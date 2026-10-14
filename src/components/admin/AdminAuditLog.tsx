@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { AuditLogEntry } from '../../types';
-import { api } from '../../api';
-import { Download, FileSpreadsheet, Shield, Loader2 } from 'lucide-react';
-import { supabase } from '../../lib/supabase';
+import { api, getKolkataDateString } from '../../api';
+import { FileSpreadsheet, Loader2, AlertCircle } from 'lucide-react';
+import { Pentagon } from '../brand/Decorations';
 
 export const AdminAuditLog: React.FC = () => {
   const [logs, setLogs] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     loadLogs();
@@ -17,42 +19,51 @@ export const AdminAuditLog: React.FC = () => {
     try {
       const res = await api.getAdminAuditLog();
       setLogs(res.logs);
-    } catch (err: any) {
-      console.error(err);
+    } catch (_err) {
+      // Graceful error handling
     } finally {
       setLoading(false);
     }
   };
 
-  const [exporting, setExporting] = useState(false);
-
   const handleExportExcel = async () => {
     setExporting(true);
+    setExportError(null);
+
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token || '';
+      // 1. Fetch export data in browser from database
+      const rows = await api.getAdminAttendanceExportData();
 
-      const res = await fetch('/api/admin/export-excel', {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-
-      if (!res.ok) {
-        throw new Error(`Export request failed (${res.status})`);
+      if (!rows || rows.length === 0) {
+        throw new Error('No attendance records found to export.');
       }
 
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `sibaq_master_export_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
-    } catch {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const token = sessionData?.session?.access_token || '';
-      window.location.href = `/api/admin/export-excel?token=${encodeURIComponent(token)}`;
+      // 2. Format rows with exact required columns: student, guide, date, status, level, points
+      const exportRows = rows.map((r) => ({
+        student: r.student,
+        guide: r.guide,
+        date: r.date,
+        status: r.status,
+        level: r.level || '',
+        points: r.points ?? 0,
+      }));
+
+      // 3. Lazy-load SheetJS (xlsx) only when export button is pressed
+      const XLSX = await import('xlsx');
+
+      // 4. Build worksheet and workbook
+      const worksheet = XLSX.utils.json_to_sheet(exportRows, {
+        header: ['student', 'guide', 'date', 'status', 'level', 'points'],
+      });
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Attendance');
+
+      // 5. Download file named "sibaq-attendance-YYYY-MM-DD.xlsx"
+      const dateStr = getKolkataDateString();
+      const fileName = `sibaq-attendance-${dateStr}.xlsx`;
+      XLSX.writeFile(workbook, fileName);
+    } catch (err: any) {
+      setExportError(err?.message || 'Failed to load attendance export data. Please try again.');
     } finally {
       setExporting(false);
     }
@@ -62,10 +73,10 @@ export const AdminAuditLog: React.FC = () => {
     <div className="space-y-6 pb-20">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl sm:text-3xl font-bold text-[#111111] tracking-tight">
+          <h2 className="font-serif text-[28px] sm:text-[34px] font-normal text-[#111111] leading-tight">
             Audit Log & Export
           </h2>
-          <p className="text-xs text-[#6B7280]">
+          <p className="text-[13px] text-[#6B7280]">
             Immutable record of admin modifications to historical attendance and Excel reporting
           </p>
         </div>
@@ -73,24 +84,38 @@ export const AdminAuditLog: React.FC = () => {
         <button
           onClick={handleExportExcel}
           disabled={exporting}
-          className="px-4 py-2 rounded-xl bg-[#111111] text-white text-xs font-semibold hover:bg-black flex items-center gap-1.5 shrink-0 disabled:opacity-50"
+          className="px-4 py-2.5 rounded-xl bg-[#111111] text-white text-xs font-semibold hover:bg-black flex items-center gap-1.5 shrink-0 disabled:opacity-50 transition-colors"
         >
           {exporting ? (
-            <Loader2 className="w-4 h-4 text-[#EF4B47] animate-spin" />
+            <Loader2 className="w-4 h-4 text-[#D4202C] animate-spin" />
           ) : (
-            <FileSpreadsheet className="w-4 h-4 text-[#EF4B47]" />
+            <FileSpreadsheet className="w-4 h-4 text-[#D4202C]" />
           )}
           <span>{exporting ? 'Generating Excel...' : 'Export Excel (.xlsx)'}</span>
         </button>
       </div>
+
+      {/* Export Plain Error Message */}
+      {exportError && (
+        <div
+          className="p-3.5 rounded-xl bg-white border border-[#E5E7EB] flex items-center gap-2.5 text-[#111111] text-xs font-medium leading-relaxed"
+          role="alert"
+        >
+          <AlertCircle className="w-4 h-4 shrink-0 text-[#D4202C]" />
+          <div className="flex-1">
+            <span>{exportError}</span>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
           Loading audit entries...
         </div>
       ) : logs.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-          No administrative manual changes logged. Historical records are pristine.
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280] flex flex-col items-center justify-center">
+          <Pentagon size={64} className="mb-3" />
+          <p>No administrative manual changes logged. Historical records are pristine.</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -109,12 +134,12 @@ export const AdminAuditLog: React.FC = () => {
                     {log.studentName}
                   </span>
                 </div>
-                <span className="text-[#6B7280] text-[11px] shrink-0">
+                <span className="text-[#6B7280] text-xs shrink-0">
                   {new Date(log.timestamp).toLocaleString()}
                 </span>
               </div>
 
-              <div className="text-[11px] text-[#6B7280]">
+              <div className="text-xs text-[#6B7280]">
                 Target Date: <span className="font-semibold text-[#111111]">{log.date}</span>
               </div>
 
@@ -122,7 +147,7 @@ export const AdminAuditLog: React.FC = () => {
                 <div className="text-[#6B7280]">
                   Previous: <span className="text-[#111111] font-mono">{log.oldValue}</span>
                 </div>
-                <div className="text-[#EF4B47] font-semibold">
+                <div className="text-[#D4202C] font-semibold">
                   New: <span className="text-[#111111] font-mono">{log.newValue}</span>
                 </div>
               </div>

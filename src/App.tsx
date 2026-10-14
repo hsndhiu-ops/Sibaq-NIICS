@@ -173,7 +173,7 @@ export default function App() {
   if (loadingInitial) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center text-sm text-[#6B7280]">
-        Loading DHIU Arts Fest...
+        Loading SIBAQ'26...
       </div>
     );
   }
@@ -291,7 +291,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-white text-[#111111] flex flex-col antialiased selection:bg-[#EF4B47] selection:text-white">
+    <div className="min-h-screen bg-white text-[#111111] flex flex-col antialiased selection:bg-[#D4202C] selection:text-white">
       {/* Header */}
       <Header
         user={currentUser}
@@ -299,6 +299,7 @@ export default function App() {
         onOpenNotifications={() => setIsNotificationsOpen(true)}
         onOpenProfile={() => setIsProfileOpen(true)}
         onLogout={handleLogout}
+        onHomeClick={() => setActiveTab(currentUser.role === 'student' ? 'home' : 'today')}
       />
 
       {/* Main Container */}
@@ -324,7 +325,7 @@ export default function App() {
                     onClick={() => setActiveTab(item.id)}
                     className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
                       isActive
-                        ? 'bg-[#D93F3B] text-white shadow-sm'
+                        ? 'bg-[#D4202C] text-white'
                         : 'text-[#6B7280] hover:text-[#111111] hover:bg-[#F3F4F6]'
                     }`}
                   >
@@ -350,13 +351,13 @@ export default function App() {
 
       {/* Student Bottom Navigation (4 items max: Home, Tasks, Progress, Leaderboard) */}
       {currentUser.role === 'student' && (
-        <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-[#F3F4F6] z-40 py-1.5 px-4">
+        <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-[#E5E7EB] z-40 py-1.5 px-4">
           <div className="max-w-md mx-auto grid grid-cols-4 gap-1">
             <button
               onClick={() => setActiveTab('home')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'home'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -367,7 +368,7 @@ export default function App() {
               onClick={() => setActiveTab('tasks')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'tasks'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -378,7 +379,7 @@ export default function App() {
               onClick={() => setActiveTab('progress')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'progress'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -389,7 +390,7 @@ export default function App() {
               onClick={() => setActiveTab('leaderboard')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'leaderboard'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -402,13 +403,13 @@ export default function App() {
 
       {/* Guide Bottom Navigation (3 items: Today, Tasks, Mentees. NO LEADERBOARD!) */}
       {currentUser.role === 'guide' && (
-        <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-[#F3F4F6] z-40 py-1.5 px-4">
+        <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-[#E5E7EB] z-40 py-1.5 px-4">
           <div className="max-w-md mx-auto grid grid-cols-3 gap-1">
             <button
               onClick={() => setActiveTab('today')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'today'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -419,7 +420,7 @@ export default function App() {
               onClick={() => setActiveTab('tasks')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'tasks'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -430,7 +431,7 @@ export default function App() {
               onClick={() => setActiveTab('mentees')}
               className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                 activeTab === 'mentees'
-                  ? 'text-[#EF4B47]'
+                  ? 'text-[#D4202C]'
                   : 'text-[#6B7280] hover:text-[#111111]'
               }`}
             >
@@ -444,14 +445,14 @@ export default function App() {
       {/* Admin Mobile Bottom Navigation (5 items: Today, Guides, Screenshots, Charts, More) */}
       {currentUser.role === 'admin' && (
         <>
-          <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-[#E5E7EB] z-40 py-1.5 px-2 md:hidden">
-            <div className="max-w-md mx-auto grid grid-cols-5 gap-1">
+          <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-[#E5E7EB] z-40 py-1 px-1 sm:px-2 md:hidden">
+            <div className="max-w-md mx-auto grid grid-cols-5 gap-0.5 sm:gap-1">
               <button
                 type="button"
                 onClick={() => setActiveTab('today')}
                 className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                   activeTab === 'today'
-                    ? 'text-[#D93F3B]'
+                    ? 'text-[#D4202C]'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -464,7 +465,7 @@ export default function App() {
                 onClick={() => setActiveTab('guides')}
                 className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                   activeTab === 'guides'
-                    ? 'text-[#D93F3B]'
+                    ? 'text-[#D4202C]'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -477,7 +478,7 @@ export default function App() {
                 onClick={() => setActiveTab('screenshots')}
                 className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                   activeTab === 'screenshots'
-                    ? 'text-[#D93F3B]'
+                    ? 'text-[#D4202C]'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -490,7 +491,7 @@ export default function App() {
                 onClick={() => setActiveTab('charts')}
                 className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                   activeTab === 'charts'
-                    ? 'text-[#D93F3B]'
+                    ? 'text-[#D4202C]'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -503,7 +504,7 @@ export default function App() {
                 onClick={() => setIsMoreSheetOpen(true)}
                 className={`flex flex-col items-center justify-center py-1 rounded-xl text-xs font-medium transition-colors ${
                   ['programs', 'accounts', 'audit-log'].includes(activeTab)
-                    ? 'text-[#D93F3B]'
+                    ? 'text-[#D4202C]'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -520,7 +521,7 @@ export default function App() {
                 className="fixed inset-0"
                 onClick={() => setIsMoreSheetOpen(false)}
               />
-              <div className="relative bg-white rounded-t-2xl p-5 shadow-2xl border-t border-[#E5E7EB] z-10 space-y-3 animate-in slide-in-from-bottom duration-200">
+              <div className="relative bg-white rounded-t-2xl p-5 border-t border-[#E5E7EB] z-10 space-y-3 animate-in slide-in-from-bottom duration-200">
                 <div className="flex items-center justify-between pb-2 border-b border-[#F3F4F6]">
                   <h3 className="text-sm font-bold text-[#111111]">More options</h3>
                   <button
@@ -549,11 +550,11 @@ export default function App() {
                         }}
                         className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-semibold transition-colors ${
                           isActive
-                            ? 'bg-[#FEF2F2] text-[#D93F3B]'
+                            ? 'bg-[#F3F4F6] text-[#D4202C]'
                             : 'text-[#111111] hover:bg-[#F3F4F6]'
                         }`}
                       >
-                        <Icon className={`w-4 h-4 ${isActive ? 'text-[#D93F3B]' : 'text-[#6B7280]'}`} />
+                        <Icon className={`w-4 h-4 ${isActive ? 'text-[#D4202C]' : 'text-[#6B7280]'}`} />
                         <span>{item.label}</span>
                       </button>
                     );
@@ -590,9 +591,9 @@ export default function App() {
         onLogout={handleLogout}
       />
 
-      {/* Floating Action Toast */}
+      {/* Floating Action Toast (White text only on red) */}
       {toastMessage && (
-        <div className="fixed bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-[#111111] text-white text-xs font-semibold shadow-lg transition-all animate-fade-in">
+        <div className="fixed bottom-16 sm:bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-[#D4202C] text-white text-xs font-semibold border border-[#B81B26] transition-all animate-fade-in">
           {toastMessage}
         </div>
       )}

@@ -58,7 +58,7 @@ export interface AuthenticatedRequest extends Request {
 
 /**
  * Universal authentication middleware:
- * Supports in-memory session tokens AND Supabase Auth JWTs (Authorization: Bearer <token> or ?token=)
+ * Supports in-memory session tokens AND Supabase Auth JWTs (Authorization: Bearer <token>)
  */
 export async function authMiddleware(
   req: AuthenticatedRequest,
@@ -66,7 +66,7 @@ export async function authMiddleware(
   next: NextFunction
 ) {
   try {
-    let token = (req.query.token as string) || '';
+    let token = '';
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       token = authHeader.split(' ')[1];

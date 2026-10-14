@@ -28,6 +28,9 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [fullName, setFullName] = useState(user.fullName);
   const [email, setEmail] = useState(user.email || '');
 
+  // Gmail validation error
+  const [emailError, setEmailError] = useState<string | null>(null);
+
   // Password fields state (inside account edit)
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -38,10 +41,32 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
+  const validateGmail = (val: string): boolean => {
+    const trimmed = val.trim();
+    if (!trimmed) {
+      setEmailError(null);
+      return true;
+    }
+    // Strict Gmail validation (e.g. name@gmail.com)
+    const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/i;
+    if (!gmailRegex.test(trimmed)) {
+      setEmailError('Enter a valid Gmail address');
+      return false;
+    }
+    setEmailError(null);
+    return true;
+  };
+
+  const handleEmailChange = (val: string) => {
+    setEmail(val);
+    validateGmail(val);
+  };
+
   const resetEditForm = () => {
     setUsername(user.username);
     setFullName(user.fullName);
     setEmail(user.email || '');
+    setEmailError(null);
     setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
@@ -53,47 +78,51 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
     setErrorMessage(null);
     setStatusMessage(null);
 
+    // Validate email
+    if (!validateGmail(email)) {
+      setErrorMessage('Enter a valid Gmail address');
+      return;
+    }
+
     // Validate password change if any password field is touched
     const wantsPasswordChange = currentPassword.length > 0 || newPassword.length > 0 || confirmPassword.length > 0;
     if (wantsPasswordChange) {
       if (!currentPassword) {
-        setErrorMessage('Current Password Is Required to Update Password.');
+        setErrorMessage('Current password is required to update password.');
         return;
       }
       if (newPassword.length < 4) {
-        setErrorMessage('New Password Must Be at Least 4 Characters.');
+        setErrorMessage('New password must be at least 4 characters.');
         return;
       }
       if (newPassword !== confirmPassword) {
-        setErrorMessage('New Passwords Do Not Match.');
+        setErrorMessage('New passwords do not match.');
         return;
       }
     }
 
     setIsSaving(true);
     try {
-      // 1. Update notification email (profiles: user may update only their own notification_email)
       const res = await api.updateProfile({
         email: email.trim() || undefined,
       });
       onUserUpdated(res.user);
 
-      // 2. Update Password if specified
       if (wantsPasswordChange) {
         await api.changePassword({ currentPassword, newPassword });
       }
 
       setStatusMessage(
         wantsPasswordChange
-          ? 'Account Information and Password Updated Successfully.'
-          : 'Account Information Updated Successfully.'
+          ? 'Account information and password updated successfully.'
+          : 'Account information updated successfully.'
       );
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       setIsEditingInfo(false);
     } catch (err: any) {
-      setErrorMessage(err.message || 'Failed to Update Account Settings.');
+      setErrorMessage(err.message || 'Failed to update account settings.');
     } finally {
       setIsSaving(false);
     }
@@ -102,20 +131,22 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   const getRoleDisplayName = (role: string) => {
     if (role === 'admin') return 'Administrator';
     if (role === 'guide') return 'Guide Supervisor';
-    return 'Candidate';
+    return 'Student';
   };
+
+  const isSaveDisabled = isSaving || Boolean(emailError);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] sm:max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col border border-[#E5E7EB] overflow-hidden">
         {/* Header */}
         <div className="p-3.5 sm:p-4 border-b border-[#F3F4F6] flex items-center justify-between gap-2">
           <div className="min-w-0 pr-2">
             <h2 className="text-base sm:text-lg font-bold text-[#111111] truncate">
-              Profile & Account Settings
+              Profile & account settings
             </h2>
-            <p className="text-[11px] sm:text-xs text-[#6B7280] truncate mt-0.5">
-              Manage Personal Credentials and Contact Preferences
+            <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
+              Manage personal credentials and contact preferences
             </p>
           </div>
           <button
@@ -132,8 +163,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
           {/* Account Information Section */}
           <div className="p-4 rounded-xl sm:rounded-2xl bg-[#F3F4F6] space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-[11px] sm:text-xs font-bold text-[#6B7280] uppercase tracking-wider">
-                Account Information
+              <span className="text-xs font-bold text-[#6B7280]">
+                Account information
               </span>
               {!isEditingInfo ? (
                 <button
@@ -144,7 +175,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   }}
                   className="px-2.5 py-1 rounded-lg bg-white text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center gap-1 transition-colors"
                 >
-                  <Pencil className="w-3 h-3 text-[#EF4B47]" />
+                  <Pencil className="w-3 h-3 text-[#D4202C]" />
                   <span>Edit</span>
                 </button>
               ) : (
@@ -164,15 +195,15 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               /* Compact Summary View */
               <div className="space-y-2 pt-1 text-xs">
                 <div>
-                  <span className="text-[11px] text-[#6B7280] block">Full Name</span>
+                  <span className="text-xs text-[#6B7280] block">Full name</span>
                   <span className="font-bold text-sm text-[#111111] block">
                     {user.fullName}
                   </span>
                 </div>
 
                 <div>
-                  <span className="text-[11px] text-[#6B7280] block">
-                    Username / Identification ID
+                  <span className="text-xs text-[#6B7280] block">
+                    Username / identification ID
                   </span>
                   <span className="font-semibold text-xs text-[#111111] block font-mono">
                     {user.username}
@@ -180,17 +211,17 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
 
                 <div>
-                  <span className="text-[11px] text-[#6B7280] block">
-                    Notification Email Address
+                  <span className="text-xs text-[#6B7280] block">
+                    Gmail address
                   </span>
                   <span className="font-medium text-xs text-[#111111] block">
-                    {user.email || 'No Email Configured'}
+                    {user.email || 'No email configured'}
                   </span>
                 </div>
 
                 <div className="pt-1 flex items-center gap-1.5">
-                  <span className="text-[11px] text-[#6B7280]">Designated Role:</span>
-                  <span className="px-2 py-0.5 rounded-md bg-white text-[11px] font-semibold text-[#111111]">
+                  <span className="text-xs text-[#6B7280]">Designated role:</span>
+                  <span className="px-2 py-0.5 rounded-md bg-white text-xs font-semibold text-[#111111]">
                     {getRoleDisplayName(user.role)}
                   </span>
                 </div>
@@ -199,8 +230,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
               /* Expanded Edit Form including Password Change */
               <form onSubmit={handleSaveAccount} className="space-y-3 pt-1">
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#111111] mb-1">
-                    Full Name
+                  <label className="block text-xs font-semibold text-[#111111] mb-1">
+                    Full name
                   </label>
                   <input
                     type="text"
@@ -212,8 +243,8 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#111111] mb-1">
-                    Username / Identification ID
+                  <label className="block text-xs font-semibold text-[#111111] mb-1">
+                    Username / identification ID
                   </label>
                   <input
                     type="text"
@@ -222,42 +253,46 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                     required
                     className="w-full px-3 py-2 rounded-xl bg-white text-xs text-[#111111] border-0 font-mono"
                   />
-                  <p className="text-[10px] text-[#6B7280] mt-0.5">
+                  <p className="text-xs text-[#6B7280] mt-0.5">
                     Customize your personal login username or roll identifier.
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-[11px] font-semibold text-[#111111] mb-1">
-                    Notification Email Address
+                  <label className="block text-xs font-semibold text-[#111111] mb-1">
+                    Gmail address
                   </label>
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="user@gmail.com"
-                    className="w-full px-3 py-2 rounded-xl bg-white text-xs text-[#111111] border-0"
+                    onChange={(e) => handleEmailChange(e.target.value)}
+                    onBlur={(e) => validateGmail(e.target.value)}
+                    placeholder="name@gmail.com"
+                    className={`w-full px-3 py-2 rounded-xl bg-white text-xs text-[#111111] border ${
+                      emailError ? 'border-[#D4202C]' : 'border-transparent'
+                    } focus:outline-none`}
                   />
-                  <p className="text-[10px] text-[#6B7280] mt-0.5">
-                    System reminders and alerts are delivered to this address.
-                  </p>
+                  {emailError ? (
+                    <p className="text-xs text-[#D4202C] mt-1 font-medium">{emailError}</p>
+                  ) : (
+                    <p className="text-xs text-[#6B7280] mt-0.5">
+                      Enter a valid Gmail address (e.g. name@gmail.com).
+                    </p>
+                  )}
                 </div>
 
                 {/* Password Update Subsection */}
-                <div className="pt-2 border-t border-gray-200/80 space-y-2.5">
+                <div className="pt-2 border-t border-gray-200 space-y-2.5">
                   <div className="flex items-center gap-1.5 mb-1">
                     <Lock className="w-3.5 h-3.5 text-[#6B7280]" />
-                    <span className="text-[11px] font-bold text-[#111111]">
-                      Update Password (Optional)
+                    <span className="text-xs font-bold text-[#111111]">
+                      Change password (optional)
                     </span>
                   </div>
-                  <p className="text-[10px] text-[#6B7280]">
-                    Leave password fields blank if you do not wish to modify your password.
-                  </p>
 
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#6B7280] mb-1">
-                      Current Password
+                    <label className="block text-xs text-[#6B7280] mb-1">
+                      Current password
                     </label>
                     <input
                       type="password"
@@ -269,21 +304,21 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#6B7280] mb-1">
-                      New Password
+                    <label className="block text-xs text-[#6B7280] mb-1">
+                      New password
                     </label>
                     <input
                       type="password"
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Enter new password (min. 4 characters)"
+                      placeholder="Minimum 4 characters"
                       className="w-full px-3 py-2 rounded-xl bg-white text-xs text-[#111111] border-0"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-semibold text-[#6B7280] mb-1">
-                      Confirm New Password
+                    <label className="block text-xs text-[#6B7280] mb-1">
+                      Confirm new password
                     </label>
                     <input
                       type="password"
@@ -296,7 +331,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 </div>
 
                 {errorMessage && (
-                  <p className="text-xs text-[#EF4B47] font-medium pt-1">{errorMessage}</p>
+                  <p className="text-xs text-[#D4202C] font-medium pt-1">{errorMessage}</p>
                 )}
 
                 <div className="flex items-center justify-end gap-2 pt-2">
@@ -306,48 +341,45 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                       resetEditForm();
                       setIsEditingInfo(false);
                     }}
-                    className="px-3 py-1.5 rounded-xl bg-white text-xs font-semibold text-[#6B7280] hover:text-[#111111]"
+                    className="px-3 py-1.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#6B7280] hover:text-[#111111]"
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    disabled={isSaving}
-                    className="px-3.5 py-1.5 rounded-xl bg-[#EF4B47] text-white text-xs font-semibold hover:opacity-95 disabled:opacity-50 transition-opacity shadow-sm"
+                    disabled={isSaveDisabled}
+                    className="px-3.5 py-1.5 rounded-[10px] bg-[#D4202C] text-white text-xs font-semibold hover:bg-[#B81B26] active:bg-[#B81B26] disabled:opacity-50 transition-colors"
                   >
-                    {isSaving ? 'Saving...' : 'Save Changes'}
+                    {isSaving ? 'Saving...' : 'Save changes'}
                   </button>
                 </div>
               </form>
             )}
-
-            {statusMessage && (
-              <p className="text-xs text-[#111111] font-semibold pt-1">
-                {statusMessage}
-              </p>
-            )}
           </div>
 
-          {/* Central Administration Policy Note */}
-          <div className="p-3 rounded-xl bg-[#F3F4F6] text-[11px] text-[#6B7280] leading-relaxed">
-            Accounts and initial credentials are administered centrally. System notifications and updates are delivered to the registered email address.
+          {statusMessage && (
+            <div className="p-3 rounded-xl bg-white border border-gray-200 text-xs text-[#111111]">
+              {statusMessage}
+            </div>
+          )}
+
+          {/* Privacy & Account Security Notes */}
+          <div className="p-3 rounded-xl bg-[#F3F4F6] text-xs text-[#6B7280] leading-relaxed">
+            Personal login credentials and contact email are kept private. Screen-time screenshots are automatically erased after 48 hours.
           </div>
         </div>
 
-        {/* Footer */}
-        <div className="p-3.5 sm:p-4 border-t border-[#F3F4F6] bg-white flex items-center justify-between gap-3">
+        {/* Footer: Sign Out Button */}
+        <div className="p-3.5 sm:p-4 border-t border-[#F3F4F6] bg-gray-50 flex items-center justify-between">
+          <span className="text-xs text-[#6B7280]">
+            Logged in as <strong className="text-[#111111]">{user.username}</strong>
+          </span>
           <button
             onClick={onLogout}
-            className="px-3.5 py-2 rounded-xl bg-red-50 text-[#EF4B47] hover:bg-red-100 font-semibold text-xs flex items-center gap-1.5 transition-colors border border-red-100 shadow-sm"
+            className="px-3.5 py-1.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#D4202C] hover:bg-[#F3F4F6] flex items-center gap-1.5 transition-colors"
           >
-            <LogOut className="w-3.5 h-3.5 shrink-0" />
-            <span>Sign Out</span>
-          </button>
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-[#F3F4F6] text-[#111111] font-semibold text-xs hover:bg-gray-200 transition-colors"
-          >
-            Close
+            <LogOut className="w-3.5 h-3.5" />
+            <span>Sign out</span>
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../api';
 import { Check, Bell, Flame } from 'lucide-react';
+import { Pentagon } from '../brand/Decorations';
 
 interface AdminGuidesProps {
   onSelectStudent: (studentId: string) => void;
@@ -25,8 +26,8 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
       const res = await api.getAdminGuides();
       setGuides(res.guides);
       setDate(res.date);
-    } catch (err: any) {
-      console.error(err);
+    } catch (_err) {
+      // Graceful error handling
     } finally {
       setLoading(false);
     }
@@ -52,14 +53,15 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
   return (
     <div className="space-y-6 pb-20">
       <div>
-        <h2 className="text-2xl sm:text-3xl font-bold text-[#111111] tracking-tight">
+        <h2 className="font-serif text-[28px] sm:text-[34px] font-normal text-[#111111] leading-tight">
           Guides
         </h2>
       </div>
 
       {guides.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-          No guides configured yet. Create guide accounts in the Accounts tab.
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280] flex flex-col items-center justify-center">
+          <Pentagon size={64} className="mb-3" />
+          <p>No guides configured yet. Create guide accounts in the Accounts tab.</p>
         </div>
       ) : (
         <div className="space-y-4">
@@ -89,7 +91,7 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
                   </button>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-[#111111]">
-                    <Check className="w-3.5 h-3.5 text-[#EF4B47]" />
+                    <Check className="w-3.5 h-3.5 text-[#D4202C]" />
                     All marked
                   </span>
                 )}
@@ -114,11 +116,11 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
                         className="p-3 rounded-xl bg-white flex items-center justify-between gap-3 cursor-pointer hover:bg-gray-50 transition-colors"
                       >
                         <div className="min-w-0">
-                          <div className="font-bold text-xs text-[#111111] truncate">
+                          <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
                             {m.fullName}
                           </div>
                           {m.programs.length > 0 && (
-                            <div className="text-[11px] text-[#6B7280] truncate">
+                            <div className="text-xs text-[#6B7280] truncate mt-0.5">
                               {m.programs.join(', ')}
                             </div>
                           )}
@@ -126,18 +128,18 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
 
                         <div className="flex items-center gap-2 shrink-0">
                           {isPresent ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EF4B47] text-white text-[11px] font-semibold">
-                              <Check className="w-3 h-3 stroke-[3]" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#D4202C] text-white text-xs font-semibold">
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
                               Present
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#6B7280] text-[11px] font-semibold">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#F3F4F6] text-[#6B7280] text-xs font-semibold">
                               <span>-</span>
                               Absent
                             </span>
                           )}
 
-                          <div className="text-[11px] font-semibold text-[#111111] min-w-12 text-right">
+                          <div className="text-xs font-semibold text-[#111111] min-w-12 text-right">
                             {isPresent
                               ? m.attendance?.points !== null
                                 ? `${m.attendance?.points} pts`
@@ -145,8 +147,8 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
                               : '0 pts'}
                           </div>
 
-                          <div className="flex items-center gap-0.5 text-[11px] text-[#111111] font-semibold bg-[#F3F4F6] px-1.5 py-0.5 rounded">
-                            <Flame className="w-3 h-3 text-[#EF4B47]" />
+                          <div className="flex items-center gap-0.5 text-xs text-[#111111] font-semibold bg-[#F3F4F6] px-2 py-0.5 rounded-lg">
+                            <Flame className="w-3.5 h-3.5 text-[#D4202C]" />
                             <span>{m.streak}d</span>
                           </div>
                         </div>

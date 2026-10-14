@@ -690,11 +690,26 @@ export const api = {
     const me = (await api.getMe()).user;
     const today = getKolkataDateString();
 
+    // Check if one already recorded today before RPC or if RPC errors
+    const { data: existing } = await supabase
+      .from(TABLES.SCREENSHOT_LOG)
+      .select('*')
+      .eq(SCREENSHOT_LOG_COLS.STUDENT_ID, me.id)
+      .eq(SCREENSHOT_LOG_COLS.DATE, today)
+      .maybeSingle();
+
+    if (existing) {
+      throw new Error("You already submitted today's screenshot.");
+    }
+
     const { error: rpcErr } = await supabase.rpc(RPCS.RECORD_SCREENSHOT, {
       [RPC_ARGS.RECORD_SCREENSHOT.PATH]: data.fileId,
     });
 
     if (rpcErr) {
+      if (rpcErr.message && (rpcErr.message.includes('unique') || rpcErr.message.includes('duplicate') || rpcErr.message.includes('already'))) {
+        throw new Error("You already submitted today's screenshot.");
+      }
       throw new Error("Couldn't save screenshot record. Try again.");
     }
 
@@ -712,7 +727,7 @@ export const api = {
       status: 'submitted',
     };
 
-    return { record, message: 'Screenshot uploaded and verified.' };
+    return { record, message: 'Screenshot submitted successfully.' };
   },
 
   // -------------------------------------------------------------
@@ -958,8 +973,9 @@ export const api = {
   createGuideTask: async (data: {
     studentId: string;
     title: string;
-    description: string;
-    dueDate: string;
+    description?: string;
+    dueDate?: string;
+    attachmentFile?: File | null;
     attachmentFileId?: string | null;
     attachmentFileName?: string | null;
   }): Promise<{ task: TaskRecord }> => {
@@ -972,7 +988,7 @@ export const api = {
         [TASKS_COLS.STUDENT_ID]: data.studentId,
         [TASKS_COLS.TITLE]: data.title,
         [TASKS_COLS.DESCRIPTION]: data.description || '',
-        [TASKS_COLS.DUE_DATE]: data.dueDate,
+        [TASKS_COLS.DUE_DATE]: data.dueDate || new Date().toISOString().split('T')[0],
         [TASKS_COLS.STATUS]: TASK_STATUS.ASSIGNED,
       })
       .select()
@@ -982,11 +998,27 @@ export const api = {
       throw new Error("Couldn't create task. Try again.");
     }
 
-    if (data.attachmentFileId) {
+    let storagePath = data.attachmentFileId;
+    let fileName = data.attachmentFileName;
+
+    if (data.attachmentFile) {
+      try {
+        const uploaded = await api.uploadFile(data.attachmentFile, 'task_attachment', {
+          taskId: taskRow[TASKS_COLS.ID],
+          studentId: data.studentId,
+        });
+        storagePath = uploaded.fileId;
+        fileName = uploaded.originalName;
+      } catch (uploadErr) {
+        // Continue even if attachment upload fails
+      }
+    }
+
+    if (storagePath) {
       await supabase.from(TABLES.TASK_FILES).insert({
         [TASK_FILES_COLS.TASK_ID]: taskRow[TASKS_COLS.ID],
-        [TASK_FILES_COLS.STORAGE_PATH]: data.attachmentFileId,
-        [TASK_FILES_COLS.FILE_NAME]: data.attachmentFileName || 'attachment',
+        [TASK_FILES_COLS.STORAGE_PATH]: storagePath,
+        [TASK_FILES_COLS.FILE_NAME]: fileName || 'attachment',
         [TASK_FILES_COLS.KIND]: TASK_FILE_KINDS.GUIDE_ATTACHMENT,
         [TASK_FILES_COLS.UPLOADER_ID]: me.id,
       });
@@ -1084,16 +1116,18 @@ export const api = {
    * Send reminder to student.
    * Calls send_reminder(p_target, p_message) RPC.
    */
-  remindStudent: async (data: { studentId: string; type: 'meet' | 'task'; taskTitle?: string }): Promise<{ success: boolean; message: string }> => {
+  remindStudent: async (data: { studentId: string; type?: 'meet' | 'task'; message?: string; taskTitle?: string }): Promise<{ success: boolean; message: string }> => {
     const me = (await api.getMe()).user;
-    const message =
-      data.type === 'meet'
-        ? `${me.fullName} has requested you to meet with them today regarding your preparations.`
-        : `Reminder from ${me.fullName}: Please complete task "${data.taskTitle || 'Pending task'}".`;
+    const finalMessage =
+      data.message && data.message.trim()
+        ? data.message.trim()
+        : data.type === 'task'
+        ? `Reminder from ${me.fullName}: Please complete task "${data.taskTitle || 'Pending task'}".`
+        : `${me.fullName} has requested you to meet with them today regarding your preparations.`;
 
     const { error } = await supabase.rpc(RPCS.SEND_REMINDER, {
       [RPC_ARGS.SEND_REMINDER.TARGET]: data.studentId,
-      [RPC_ARGS.SEND_REMINDER.MESSAGE]: message,
+      [RPC_ARGS.SEND_REMINDER.MESSAGE]: finalMessage,
     });
 
     if (error) {
@@ -1780,15 +1814,46 @@ export const api = {
   },
 
   assignGuide: async (studentIds: string[], guideId: string): Promise<{ success: boolean; message: string }> => {
-    const { error } = await supabase
-      .from(TABLES.PROFILES)
-      .update({ [PROFILES_COLS.GUIDE_ID]: guideId })
-      .in(PROFILES_COLS.ID, studentIds);
+    try {
+      const res = await callSecretServerEndpoint<{ success: boolean; message: string }>('/api/assign-guide', {
+        method: 'POST',
+        body: JSON.stringify({ studentIds, guideId }),
+      });
+      return res;
+    } catch (serverErr: any) {
+      try {
+        const res = await callSecretServerEndpoint<{ success: boolean; message: string }>('/api/admin/assign-guide', {
+          method: 'POST',
+          body: JSON.stringify({ studentIds, guideId }),
+        });
+        return res;
+      } catch (adminErr: any) {
+        // Fallback: update individual users via /api/update-user
+        try {
+          await Promise.all(
+            studentIds.map((sid) =>
+              callSecretServerEndpoint('/api/update-user', {
+                method: 'POST',
+                body: JSON.stringify({ userId: sid, guideId }),
+              })
+            )
+          );
+          return { success: true, message: `Assigned ${studentIds.length} students to guide successfully.` };
+        } catch {
+          // Direct client fallback if policies allow
+          const { error } = await supabase
+            .from(TABLES.PROFILES)
+            .update({ [PROFILES_COLS.GUIDE_ID]: guideId })
+            .in(PROFILES_COLS.ID, studentIds);
 
-    if (error) {
-      throw new Error("Couldn't assign guide. Try again.");
+          if (error) {
+            console.error(`[${TABLES.PROFILES}] assign guide fallback error:`, error.message, error);
+            throw new Error(serverErr?.message || adminErr?.message || error.message || "Couldn't assign guide. Try again.");
+          }
+          return { success: true, message: 'Guide assigned successfully.' };
+        }
+      }
     }
-    return { success: true, message: 'Guide assigned successfully.' };
   },
 
   assignProgramsToStudent: async (studentId: string, programIds: string[]): Promise<{ success: boolean }> => {
@@ -1850,6 +1915,55 @@ export const api = {
     }
 
     return { record: mapAttendanceRow(updated) };
+  },
+
+  getAdminAttendanceExportData: async (): Promise<Array<{
+    student: string;
+    guide: string;
+    date: string;
+    status: string;
+    level: string;
+    points: number;
+  }>> => {
+    try {
+      const { data: profiles, error: profErr } = await supabase
+        .from(TABLES.PROFILES)
+        .select('*');
+
+      if (!profErr && profiles) {
+        const profileMap = new Map<string, any>();
+        profiles.forEach((p) => profileMap.set(p[PROFILES_COLS.ID], p));
+
+        const { data: attRows, error: attErr } = await supabase
+          .from(TABLES.ATTENDANCE)
+          .select('*')
+          .order(ATTENDANCE_COLS.DATE, { ascending: false });
+
+        if (!attErr && attRows) {
+          return attRows.map((row) => {
+            const student = profileMap.get(row[ATTENDANCE_COLS.STUDENT_ID]);
+            const guideId = student ? student[PROFILES_COLS.GUIDE_ID] : null;
+            const guide = guideId ? profileMap.get(guideId) : null;
+            return {
+              student: student ? student[PROFILES_COLS.FULL_NAME] || student[PROFILES_COLS.USERNAME] : row[ATTENDANCE_COLS.STUDENT_ID],
+              guide: guide ? guide[PROFILES_COLS.FULL_NAME] || guide[PROFILES_COLS.USERNAME] : 'Unassigned',
+              date: row[ATTENDANCE_COLS.DATE],
+              status: row[ATTENDANCE_COLS.STATUS] || 'absent',
+              level: row[ATTENDANCE_COLS.SCORE_LEVEL] || row.level || '',
+              points: row[ATTENDANCE_COLS.POINTS] ?? (row[ATTENDANCE_COLS.STATUS] === 'present' ? 5 : 0),
+            };
+          });
+        }
+      }
+    } catch {
+      // Fallback
+    }
+
+    const res = await callSecretServerEndpoint<{ rows: any[] }>('/api/admin/attendance-export');
+    if (res && Array.isArray(res.rows)) {
+      return res.rows;
+    }
+    throw new Error("Couldn't load attendance data for export. Try again.");
   },
 
   /**
@@ -2107,9 +2221,8 @@ export const api = {
         .from(BUCKETS.SCREENSHOTS)
         .createSignedUrl(pathOrUrl, 3600);
       if (signed?.signedUrl) return signed.signedUrl;
-      if (signErr) console.warn('Supabase createSignedUrl error:', signErr.message);
-    } catch (e) {
-      console.warn('Failed to sign screenshot URL:', e);
+    } catch (_e) {
+      // Graceful fallback
     }
 
     try {
@@ -2142,8 +2255,8 @@ export const api = {
         if (pathsToRemove.length > 0) {
           try {
             await supabase.storage.from(BUCKETS.SCREENSHOTS).remove(pathsToRemove);
-          } catch (stErr) {
-            console.warn('Storage purge warning:', stErr);
+          } catch (_stErr) {
+            // Ignored
           }
         }
 
@@ -2157,8 +2270,8 @@ export const api = {
           supabasePurged = oldScreenshots.length;
         }
       }
-    } catch (sbErr) {
-      console.warn('Direct Supabase screenshot purge error:', sbErr);
+    } catch (_sbErr) {
+      // Ignored
     }
 
     try {

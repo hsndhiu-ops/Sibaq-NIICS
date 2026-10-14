@@ -1,19 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --color-coral: #EF4B47;
-  --color-text-main: #111111;
-  --color-text-secondary: #6B7280;
-  --color-surface: #F3F4F6;
-  --color-border-subtle: #E5E7EB;
+  --red: #D4202C;
+  --red-dark: #B81B26;
+  --yellow: #F1B11C;
+  --green: #28B058;
+  --white: #FFFFFF;
+  --surface: #F3F4F6;
+  --text: #111111;
+  --muted: #6B7280;
+  --border: #E5E7EB;
+
+  --font-serif: 'DM Serif Display', Georgia, serif;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 }
 
 body {
   margin: 0;
   padding: 0;
-  background-color: #FFFFFF;
-  color: #111111;
+  background-color: var(--white);
+  color: var(--text);
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
@@ -21,24 +27,27 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Ensure minimum text size is 12px throughout */
 * {
   box-sizing: border-box;
 }
 
-/* Custom focus ring with coral outline */
+/* Focus outlines (2px, 2px offset) in red */
 input:focus, select:focus, textarea:focus, button:focus-visible {
-  outline: 2px solid #EF4B47;
-  outline-offset: 1px;
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
 }
 
-/* Remove default appearance for clean inputs */
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+/* Input default styling */
 input, select, textarea {
   font-family: inherit;
   font-size: 15px;
 }
 
-/* Disable pull-to-refresh on mobile apps to feel native */
+/* Disable pull-to-refresh on mobile apps */
 html, body {
   overscroll-behavior-y: contain;
 }

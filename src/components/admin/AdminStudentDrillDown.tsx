@@ -107,8 +107,8 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
     try {
       const res = await api.getAdminStudentDetail(studentId);
       setData(res);
-    } catch (err: any) {
-      console.error(err);
+    } catch (_err) {
+      // Graceful error handling
     } finally {
       setLoading(false);
     }
@@ -182,7 +182,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
             <h2 className="text-base sm:text-lg font-bold text-[#111111] truncate">
               {student.fullName}
             </h2>
-            <p className="text-[11px] sm:text-xs text-[#6B7280] truncate mt-0.5">
+            <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
               Roll: {student.username} • Guide: {guide ? guide.fullName : 'Unassigned'}
               {student.email ? ` • ${student.email}` : ''}
             </p>
@@ -198,31 +198,31 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
         {/* Modal Body */}
         <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 sm:space-y-6 flex-1">
-          {/* Top Metric Cards: Responsive 3 columns with mobile spacing */}
+          {/* Top Metric Cards */}
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
             <div className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-[#F3F4F6] text-center flex flex-col justify-center">
-              <div className="text-[11px] sm:text-xs font-semibold text-[#6B7280]">Streak</div>
-              <div className="text-lg sm:text-xl font-extrabold text-[#EF4B47] flex items-center justify-center gap-1 my-0.5 sm:my-1">
+              <div className="text-xs font-semibold text-[#6B7280]">Streak</div>
+              <div className="text-lg sm:text-xl font-extrabold text-[#D4202C] flex items-center justify-center gap-1 my-0.5 sm:my-1">
                 <Flame className="w-4 h-4 shrink-0" />
                 <span>{streak}d</span>
               </div>
-              <div className="text-[10px] sm:text-[11px] text-[#6B7280]">consecutive</div>
+              <div className="text-xs text-[#6B7280]">consecutive</div>
             </div>
 
             <div className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-[#F3F4F6] text-center flex flex-col justify-center">
-              <div className="text-[11px] sm:text-xs font-semibold text-[#6B7280]">Total Points</div>
+              <div className="text-xs font-semibold text-[#6B7280]">Total Points</div>
               <div className="text-lg sm:text-xl font-extrabold text-[#111111] my-0.5 sm:my-1">
                 {totalPoints} pts
               </div>
-              <div className="text-[10px] sm:text-[11px] text-[#6B7280]">earned marks</div>
+              <div className="text-xs text-[#6B7280]">earned marks</div>
             </div>
 
             <div className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-[#F3F4F6] text-center flex flex-col justify-center">
-              <div className="text-[11px] sm:text-xs font-semibold text-[#6B7280]">Programs</div>
+              <div className="text-xs font-semibold text-[#6B7280]">Programs</div>
               <div className="text-lg sm:text-xl font-extrabold text-[#111111] my-0.5 sm:my-1">
                 {programs.length}
               </div>
-              <div className="text-[10px] sm:text-[11px] text-[#6B7280]">assigned items</div>
+              <div className="text-xs text-[#6B7280]">assigned items</div>
             </div>
           </div>
 
@@ -254,7 +254,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                 <h3 className="font-bold text-xs sm:text-sm text-[#111111]">
                   Attendance Records
                 </h3>
-                <p className="text-[11px] sm:text-xs text-[#6B7280]">
+                <p className="text-[13px] text-[#6B7280]">
                   {showFullAttendance
                     ? `Showing all ${attendanceHistory.length} days of history`
                     : `Showing recent 7 days (${attendanceHistory.length} total logged)`}
@@ -293,12 +293,12 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-[#111111]">{a.date}</span>
                           {isPresent ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#EF4B47] text-white text-[11px] font-semibold">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#D4202C] text-white text-xs font-semibold">
                               <Check className="w-3 h-3 stroke-[3]" />
                               Present
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white text-[#6B7280] text-[11px] font-semibold">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-white text-[#6B7280] text-xs font-semibold">
                               <span>-</span>
                               Absent
                             </span>
@@ -306,7 +306,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                         </div>
 
                         {a.note && (
-                          <p className="text-[11px] text-[#6B7280] italic break-words">
+                          <p className="text-xs text-[#6B7280] italic break-words">
                             Note: {a.note}
                           </p>
                         )}
@@ -334,7 +334,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
               <h3 className="font-bold text-xs sm:text-sm text-[#111111]">
                 Tasks ({tasks.length})
               </h3>
-              <p className="text-[11px] sm:text-xs text-[#6B7280]">
+              <p className="text-[13px] text-[#6B7280]">
                 {tasks.filter((t) => t.status === 'completed').length} completed • {tasks.filter((t) => t.status === 'awaiting_review').length} awaiting review • {tasks.filter((t) => t.status === 'assigned' || (t.status as any) === 'pending').length} assigned
               </p>
             </div>
@@ -355,7 +355,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                       key={task.id}
                       className={`p-3.5 sm:p-4 rounded-xl sm:rounded-2xl space-y-2.5 sm:space-y-3 text-xs transition-all ${
                         isAwaitingReview
-                          ? 'bg-amber-50/70 border border-amber-200/80'
+                          ? 'bg-white border border-[#E5E7EB] shadow-2xs'
                           : 'bg-[#F3F4F6]'
                       }`}
                     >
@@ -365,7 +365,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                           <h4 className="font-bold text-xs sm:text-sm text-[#111111] break-words">
                             {task.title}
                           </h4>
-                          <span className="text-[11px] text-[#6B7280] block mt-0.5">
+                          <span className="text-xs text-[#6B7280] block mt-0.5">
                             Due: <strong className="text-[#111111]">{task.dueDate}</strong>
                             {task.submittedAt && (
                               <span> • Submitted {new Date(task.submittedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })} at {new Date(task.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -378,19 +378,19 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
                         <div className="flex items-center gap-1.5 self-start shrink-0">
                           {isDone && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-xs font-semibold bg-[#111111] text-white">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-white" />
                               Completed
                             </span>
                           )}
                           {isAwaitingReview && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
-                              <Clock className="w-3.5 h-3.5" />
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-xs font-semibold bg-white text-[#111111] border border-[#E5E7EB]">
+                              <Clock className="w-3.5 h-3.5 text-[#111111]" />
                               Awaiting review
                             </span>
                           )}
                           {isAssigned && (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 sm:py-1 rounded-full text-xs font-semibold bg-white text-[#6B7280] border border-[#E5E7EB]">
                               Assigned
                             </span>
                           )}
@@ -407,9 +407,9 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                                     setReviewNote('');
                                     setReviewError(null);
                                   }}
-                                  className="px-2 py-0.5 sm:py-1 rounded-lg bg-white border border-[#E5E7EB] text-[11px] font-semibold text-[#111111] hover:bg-gray-100 flex items-center gap-1"
+                                  className="px-2.5 py-1 rounded-lg bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center gap-1"
                                 >
-                                  <RotateCcw className="w-3 h-3 text-amber-600" />
+                                  <RotateCcw className="w-3 h-3 text-[#6B7280]" />
                                   <span>Send back</span>
                                 </button>
                               )}
@@ -421,9 +421,9 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                                   setReviewNote('');
                                   setReviewError(null);
                                 }}
-                                className="px-2 py-0.5 sm:py-1 rounded-lg bg-emerald-600 text-[11px] font-semibold text-white hover:bg-emerald-700 flex items-center gap-1 shadow-2xs"
+                                className="px-2.5 py-1 rounded-lg bg-[#111111] text-xs font-semibold text-white hover:bg-black flex items-center gap-1 shadow-2xs"
                               >
-                                <Check className="w-3 h-3" />
+                                <Check className="w-3 h-3 text-white" />
                                 <span>Complete</span>
                               </button>
                             </div>
@@ -459,7 +459,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                       {/* Mentee submission details */}
                       {(task.submissionNote || task.submissionFileId) && (
                         <div className="p-3 rounded-xl bg-white space-y-2 border border-gray-100">
-                          <span className="text-[11px] font-bold text-[#6B7280] uppercase tracking-wider block">
+                          <span className="text-xs font-bold text-[#6B7280] block">
                             Student submission
                           </span>
 
@@ -473,13 +473,13 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                             <a
                               href={
                                 task.submissionFileId.startsWith('http')
-                                  ? task.submissionFileId
-                                  : `/api/files/download/${task.submissionFileId}`
+                                ? task.submissionFileId
+                                : `/api/files/download/${task.submissionFileId}`
                               }
                               download
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F3F4F6] text-xs font-semibold text-[#D93F3B] hover:bg-gray-200 transition-colors max-w-full truncate"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#F3F4F6] text-xs font-semibold text-[#111111] hover:bg-gray-200 transition-colors max-w-full truncate"
                             >
-                              <Download className="w-3.5 h-3.5 shrink-0" />
+                              <Download className="w-3.5 h-3.5 shrink-0 text-[#D4202C]" />
                               <span className="truncate">Submission file: {task.submissionFileName || 'Download'}</span>
                             </a>
                           )}
@@ -488,9 +488,9 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
                       {/* Reviewer note if present */}
                       {task.reviewerNote && (
-                        <div className="p-2.5 rounded-xl bg-amber-50 text-amber-900 border border-amber-200 text-xs">
-                          <span className="font-semibold block text-[11px]">Feedback / review note:</span>
-                          <p>{task.reviewerNote}</p>
+                        <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs text-[#111111]">
+                          <span className="font-semibold block text-xs">Feedback / review note:</span>
+                          <p className="mt-0.5">{task.reviewerNote}</p>
                         </div>
                       )}
                     </div>
@@ -506,7 +506,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
               <h3 className="font-bold text-xs sm:text-sm text-[#111111]">
                 Nightly Screen-Time Verification ({screenshots.length})
               </h3>
-              <p className="text-[11px] sm:text-xs text-[#6B7280]">
+              <p className="text-[13px] text-[#6B7280]">
                 Daily Mobile Usage Submissions
               </p>
             </div>
@@ -528,7 +528,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                         <div className="flex items-center justify-between gap-1">
                           <span className="font-bold text-[#111111]">{s.date}</span>
                           <span
-                            className={`text-[11px] font-semibold px-2 py-0.5 rounded-full shrink-0 ${
+                            className={`text-xs font-semibold px-2 py-0.5 rounded-full shrink-0 ${
                               isPurged
                                 ? 'bg-white text-[#6B7280]'
                                 : 'bg-[#111111] text-white'
@@ -538,7 +538,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                           </span>
                         </div>
 
-                        <span className="text-[11px] text-[#6B7280] block mt-1">
+                        <span className="text-xs text-[#6B7280] block mt-1">
                           Submitted: {new Date(s.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
@@ -546,13 +546,13 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                       {!isPurged && s.fileId ? (
                         <button
                           onClick={() => setViewingScreenshotId(s.fileId)}
-                          className="w-full py-2 rounded-xl bg-white text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors"
+                          className="w-full py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors"
                         >
-                          <Eye className="w-3.5 h-3.5 text-[#EF4B47]" />
+                          <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
                           <span>Review screenshot</span>
                         </button>
                       ) : (
-                        <div className="p-1.5 rounded-lg bg-white text-[11px] text-[#6B7280] text-center italic">
+                        <div className="p-1.5 rounded-lg bg-white text-xs text-[#6B7280] text-center italic">
                           File deleted per 48-hour privacy rule
                         </div>
                       )}
@@ -648,7 +648,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
             <div className="p-3 sm:p-4 flex-1 overflow-auto flex items-center justify-center bg-[#F9FAFB] min-h-[260px] relative">
               {screenshotLoading && !screenshotError && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[#F9FAFB]/80 z-10">
-                  <Loader2 className="w-6 h-6 animate-spin text-[#EF4B47]" />
+                  <Loader2 className="w-6 h-6 animate-spin text-[#D4202C]" />
                   <span className="text-xs text-[#6B7280] font-medium">
                     Loading screenshot image...
                   </span>
@@ -657,7 +657,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
               {screenshotError ? (
                 <div className="p-6 max-w-sm text-center space-y-3">
-                  <div className="w-10 h-10 rounded-full bg-red-50 text-[#EF4B47] flex items-center justify-center mx-auto">
+                  <div className="w-10 h-10 rounded-full bg-[#F3F4F6] text-[#D4202C] flex items-center justify-center mx-auto">
                     <AlertCircle className="w-5 h-5" />
                   </div>
                   <div>
@@ -674,7 +674,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                       href={resolvedScreenshotUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-block px-3 py-1.5 rounded-xl bg-[#EF4B47] text-xs font-semibold text-white hover:opacity-95"
+                      className="inline-block px-3.5 py-1.5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-xs font-semibold text-white"
                     >
                       Open direct link
                     </a>
@@ -724,22 +724,22 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
 
             <form onSubmit={handleAdminReviewSubmit} className="p-4 sm:p-5 space-y-3.5 overflow-y-auto">
               {reviewAction === 'complete' ? (
-                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 space-y-1">
+                <div className="p-3 rounded-xl bg-[#F3F4F6] border border-[#E5E7EB] text-xs text-[#111111] space-y-1">
                   <div className="font-semibold flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                    <CheckCircle2 className="w-4 h-4 text-[#D4202C]" />
                     <span>Complete verification</span>
                   </div>
-                  <p>
+                  <p className="text-[#6B7280]">
                     Review the work or meet the student before completing. The student will be notified of completion.
                   </p>
                 </div>
               ) : (
-                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <div className="p-3 rounded-xl bg-[#F3F4F6] border border-[#E5E7EB] text-xs text-[#111111] space-y-1">
                   <div className="font-semibold flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4 text-amber-600" />
+                    <AlertCircle className="w-4 h-4 text-[#D4202C]" />
                     <span>Return for revision</span>
                   </div>
-                  <p>
+                  <p className="text-[#6B7280]">
                     Review the work or meet the student before completing. Returning will switch status back to Assigned with your required note.
                   </p>
                 </div>
@@ -759,12 +759,15 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                   }
                   rows={3}
                   required={reviewAction === 'send_back'}
-                  className="w-full p-3 rounded-xl bg-[#F9FAFB] text-xs sm:text-sm text-[#111111] border border-[#E5E7EB] focus:outline-none focus:ring-2 focus:ring-[#D93F3B]"
+                  className="w-full p-3 rounded-xl bg-[#F9FAFB] text-xs sm:text-sm text-[#111111] border border-[#E5E7EB] focus:outline-none focus:ring-2 focus:ring-[#D4202C]"
                 />
               </div>
 
               {reviewError && (
-                <p className="text-xs text-[#D93F3B] font-medium">{reviewError}</p>
+                <div className="flex items-center gap-1.5 text-xs text-[#111111] font-medium">
+                  <AlertCircle className="w-3.5 h-3.5 text-[#D4202C] shrink-0" />
+                  <span>{reviewError}</span>
+                </div>
               )}
 
               <div className="pt-1 flex items-center justify-end gap-2">
@@ -778,9 +781,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                 <button
                   type="submit"
                   disabled={isSubmittingReview}
-                  className={`px-4 py-2 rounded-xl text-xs font-semibold text-white hover:opacity-95 disabled:opacity-50 ${
-                    reviewAction === 'complete' ? 'bg-emerald-600' : 'bg-[#D93F3B]'
-                  }`}
+                  className="px-4 py-2 rounded-[10px] text-xs font-semibold text-white bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] disabled:opacity-50 transition-colors"
                 >
                   {isSubmittingReview
                     ? 'Saving...'

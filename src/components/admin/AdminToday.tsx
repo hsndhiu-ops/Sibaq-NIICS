@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AdminTodayData, LadderLevel, LADDER_POINTS } from '../../types';
 import { api } from '../../api';
-import { Check, Flame, Edit3, X, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Check, Flame, Edit3, X, Calendar, ChevronLeft, ChevronRight, AlertCircle, Search } from 'lucide-react';
+import { Pentagon } from '../brand/Decorations';
 
 interface AdminTodayProps {
   onSelectStudent: (studentId: string) => void;
@@ -24,6 +25,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
   const [data, setData] = useState<AdminTodayData | null>(null);
   const [date, setDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
   const dateInputRef = useRef<HTMLInputElement>(null);
 
   // Edit attendance modal state
@@ -136,19 +138,58 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
 
   if (loadError && !data) {
     return (
-      <div className="p-8 rounded-2xl bg-[#FEF2F2] border border-[#FCA5A5]/60 text-center text-sm text-[#B91C1C]">
-        {loadError}
+      <div className="p-4 rounded-xl bg-white border border-[#E5E7EB] flex items-center justify-center gap-2 text-center text-xs text-[#111111]">
+        <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
+        <span>{loadError}</span>
       </div>
     );
   }
 
   if (!data) return null;
 
+  const normalizeText = (text: string): string => {
+    return (text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\u02bb\u02bc\u02bd\u02be\u02bf\u2018\u2019'`ʾʿ]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const matchesSearch = (text: string, query: string): boolean => {
+    const cleanQuery = normalizeText(query);
+    if (!cleanQuery) return true;
+    const cleanText = normalizeText(text);
+    return cleanText.includes(cleanQuery);
+  };
+
+  const isSearching = Boolean(searchQuery.trim());
+
+  // Filter roster by student name or guide name
+  const filteredRoster = (data?.roster || []).filter((row) => {
+    if (!isSearching) return true;
+    return matchesSearch(row.studentName, searchQuery) || matchesSearch(row.guideName, searchQuery);
+  });
+
+  // Filter guides' progress list by guide name or if any student of this guide matches
+  const filteredGuidesStatus = (data?.guidesStatus || []).filter((g) => {
+    if (!isSearching) return true;
+    return (
+      matchesSearch(g.guideName, searchQuery) ||
+      (data?.roster || []).some(
+        (r) => r.guideId === g.guideId && matchesSearch(r.studentName, searchQuery)
+      )
+    );
+  });
+
+  const hasAnyResults = filteredRoster.length > 0 || filteredGuidesStatus.length > 0;
+
   return (
     <div className="space-y-6 pb-20">
       {/* Title Area: "Today" title only (no subtitle), text date display with prev/next arrows and calendar popup */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <h2 className="text-2xl sm:text-3xl font-bold text-[#111111] tracking-tight">
+        <h2 className="font-serif text-[28px] sm:text-[34px] font-normal text-[#111111] leading-tight">
           Today
         </h2>
 
@@ -157,7 +198,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
           <button
             type="button"
             onClick={() => handleShiftDate(-1)}
-            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors"
+            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors cursor-pointer"
             title="Previous day"
             aria-label="Previous day"
           >
@@ -176,9 +217,9 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                   }
                 }
               }}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111] hover:bg-gray-200 transition-colors select-none"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111] hover:bg-gray-200 transition-colors select-none cursor-pointer"
             >
-              <Calendar className="w-4 h-4 text-[#D93F3B]" />
+              <Calendar className="w-4 h-4 text-[#D4202C]" />
               <span>{formatDisplayDate(date) || 'Select date'}</span>
             </button>
             <input
@@ -195,7 +236,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
           <button
             type="button"
             onClick={() => handleShiftDate(1)}
-            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors"
+            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors cursor-pointer"
             title="Next day"
             aria-label="Next day"
           >
@@ -205,14 +246,15 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
       </div>
 
       {/* Stat Cards: Exactly four summary cards labeled 'Present', 'Absent', 'Not scored', 'Guides pending' */}
+      {/* Do not change the four number cards; they always count all students, not just the search results. */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3">
-        {/* Present: large number in coral exclusively, sub-label 'of N students' */}
+        {/* Present: large number in brand red exclusively, sub-label 'of N students' */}
         <div className="p-3.5 sm:p-4 rounded-xl bg-[#F3F4F6] text-center flex flex-col justify-between">
           <div className="text-xs font-semibold text-[#6B7280]">Present</div>
-          <div className="my-1.5 text-2xl sm:text-3xl font-extrabold text-[#D93F3B]">
+          <div className="my-1.5 text-2xl sm:text-3xl font-extrabold text-[#D4202C]">
             {data.stats.presentCount}
           </div>
-          <div className="text-xs text-[#6B7280]">
+          <div className="text-[13px] text-[#6B7280]">
             of {data.stats.totalStudents} students
           </div>
         </div>
@@ -245,133 +287,196 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
         </div>
       </div>
 
-      {/* Guide submission progress */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-[#F3F4F6] space-y-3">
-        <h3 className="font-bold text-xs sm:text-sm text-[#111111]">
-          Guide submission progress
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-          {data.guidesStatus.map((g) => (
-            <div
-              key={g.guideId}
-              className="p-3 rounded-xl bg-white flex items-center justify-between text-xs"
-            >
-              <div className="min-w-0 pr-2">
-                <div className="font-bold text-[#111111] truncate">{g.guideName}</div>
-                <div className="text-[#6B7280] mt-0.5">
-                  {g.markedCount} of {g.menteesCount} marked
-                </div>
-              </div>
-              {!g.allMarked && g.menteesCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => handleRemindGuide(g.guideId)}
-                  className="px-2.5 py-1 rounded-lg bg-[#FEF2F2] text-[#D93F3B] font-semibold hover:bg-red-100 transition-colors shrink-0"
-                >
-                  Remind
-                </button>
-              ) : (
-                <span className="text-[#111111] font-semibold px-2 py-1 shrink-0">Done</span>
-              )}
+      {/* Search box when more than 8 students: 44px high, 10px radius, red focus outline, visible label for screen readers, no autofocus */}
+      {data.roster.length > 8 && (
+        <div className="space-y-2">
+          <div className="relative">
+            <label htmlFor="today-search" className="sr-only">
+              Search students or guides
+            </label>
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
+            <input
+              id="today-search"
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search students or guides"
+              className="w-full h-[44px] pl-10 pr-10 rounded-[10px] bg-[#F3F4F6] text-xs sm:text-sm text-[#111111] placeholder:text-[#6B7280] border border-transparent focus:border-[#D4202C] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#D4202C]/20 transition-all"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full text-[#6B7280] hover:text-[#111111] hover:bg-gray-200 transition-colors cursor-pointer"
+                title="Clear search"
+                aria-label="Clear search"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* Result count when searching */}
+          {isSearching && (
+            <div className="text-xs text-[#6B7280] px-0.5">
+              {filteredRoster.length} {filteredRoster.length === 1 ? 'result' : 'results'}
             </div>
-          ))}
+          )}
         </div>
-      </div>
+      )}
 
-      {/* Student attendance roster */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="font-bold text-xs sm:text-sm text-[#111111]">
-            Student attendance roster ({data.roster.length})
-          </h3>
-          <span className="text-xs text-[#6B7280]">
-            Tap student to inspect
-          </span>
+      {/* When searching and nothing matches, show empty state */}
+      {isSearching && !hasAnyResults ? (
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] flex flex-col items-center justify-center text-center space-y-3">
+          <Pentagon size={64} className="text-[#6B7280]" />
+          <p className="text-sm text-[#111111]">
+            No results for "{searchQuery}"
+          </p>
+          <button
+            type="button"
+            onClick={() => setSearchQuery('')}
+            className="px-4 py-2 rounded-[10px] bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 transition-colors cursor-pointer"
+          >
+            Clear search
+          </button>
         </div>
-
-        <div className="overflow-x-auto">
-          <div className="space-y-2 min-w-full">
-            {data.roster.map((row) => {
-              const isPresent = row.status === 'present';
-              return (
-                <div
-                  key={row.studentId}
-                  className="p-3.5 sm:p-4 rounded-xl bg-[#F3F4F6] flex items-center justify-between gap-2.5 hover:bg-gray-200/60 transition-colors"
-                >
-                  {/* Clean student name & guide */}
+      ) : (
+        <>
+          {/* Guides' progress */}
+          {filteredGuidesStatus.length > 0 && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-[#F3F4F6] space-y-3">
+              <h3 className="font-bold text-sm sm:text-base text-[#111111]">
+                Guides' progress
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                {filteredGuidesStatus.map((g) => (
                   <div
-                    onClick={() => onSelectStudent(row.studentId)}
-                    className="min-w-0 flex-1 cursor-pointer"
+                    key={g.guideId}
+                    className="p-3 rounded-xl bg-white flex items-center justify-between text-xs"
                   >
-                    <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
-                      {row.studentName}
+                    <div className="min-w-0 pr-2">
+                      <div className="font-bold text-[#111111] truncate">{g.guideName}</div>
+                      <div className="text-[#6B7280] text-xs mt-0.5">
+                        {g.markedCount} of {g.menteesCount} marked
+                      </div>
                     </div>
-                    <div className="text-xs text-[#6B7280] truncate mt-0.5">
-                      Guide: {row.guideName}
-                    </div>
-                  </div>
-
-                  {/* Status, numeric score, streak & edit action */}
-                  <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
-                    {/* Status badge */}
-                    {isPresent ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#D93F3B] text-white text-xs font-semibold shrink-0">
-                        <Check className="w-3.5 h-3.5 stroke-[3]" />
-                        Present
-                      </span>
+                    {!g.allMarked && g.menteesCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={() => handleRemindGuide(g.guideId)}
+                        className="px-2.5 py-1 rounded-lg bg-white border border-[#E5E7EB] text-[#111111] font-semibold hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
+                      >
+                        Remind
+                      </button>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white text-[#6B7280] text-xs font-semibold shrink-0">
-                        <span className="font-bold leading-none">-</span>
-                        Absent
-                      </span>
+                      <span className="text-[#111111] font-semibold px-2 py-1 shrink-0">Done</span>
                     )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                    {/* Numeric score only */}
-                    <div className="text-xs font-semibold min-w-12 text-right shrink-0">
-                      {isPresent ? (
-                        row.points !== null ? (
-                          <span className="text-[#111111]">
-                            {row.points} pts
+          {/* Students */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-sm sm:text-base text-[#111111]">
+                Students
+              </h3>
+              <span className="text-[13px] text-[#6B7280]">
+                Tap student to inspect
+              </span>
+            </div>
+
+            {filteredRoster.length === 0 ? (
+              <div className="p-4 rounded-xl bg-[#F3F4F6] text-xs text-[#6B7280] text-center">
+                No students match "{searchQuery}"
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {filteredRoster.map((row) => {
+                  const isPresent = row.status === 'present';
+                  return (
+                    <div
+                      key={row.studentId}
+                      className="p-3.5 sm:p-4 rounded-xl bg-[#F3F4F6] flex items-center justify-between gap-2.5 hover:bg-gray-200/60 transition-colors"
+                    >
+                      {/* Clean student name & guide */}
+                      <div
+                        onClick={() => onSelectStudent(row.studentId)}
+                        className="min-w-0 flex-1 cursor-pointer"
+                      >
+                        <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
+                          {row.studentName}
+                        </div>
+                        <div className="text-xs text-[#6B7280] truncate mt-0.5">
+                          Guide: {row.guideName}
+                        </div>
+                      </div>
+
+                      {/* Status, numeric score, streak & edit action */}
+                      <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+                        {/* Status badge */}
+                        {isPresent ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#D4202C] text-white text-xs font-semibold shrink-0">
+                            <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            Present
                           </span>
                         ) : (
-                          <span className="text-[#D93F3B]">Pending</span>
-                        )
-                      ) : (
-                        <span className="text-[#6B7280]">0 pts</span>
-                      )}
-                    </div>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white text-[#6B7280] text-xs font-semibold shrink-0">
+                            <span className="font-bold leading-none">-</span>
+                            Absent
+                          </span>
+                        )}
 
-                    {/* Streak */}
-                    <div className="hidden sm:flex items-center gap-1 text-xs text-[#111111] font-semibold bg-white px-2 py-1 rounded-lg shrink-0">
-                      <Flame className="w-3.5 h-3.5 text-[#D93F3B]" />
-                      <span>{row.streak}d</span>
-                    </div>
+                        {/* Numeric score only */}
+                        <div className="text-xs font-semibold min-w-12 text-right shrink-0">
+                          {isPresent ? (
+                            row.points !== null ? (
+                              <span className="text-[#111111]">
+                                {row.points} pts
+                              </span>
+                            ) : (
+                              <span className="text-[#6B7280]">Pending</span>
+                            )
+                          ) : (
+                            <span className="text-[#6B7280]">0 pts</span>
+                          )}
+                        </div>
 
-                    {/* Edit button */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setEditingStudent({
-                          studentId: row.studentId,
-                          studentName: row.studentName,
-                          status: row.status,
-                          level: row.level,
-                          note: row.note,
-                        })
-                      }
-                      className="p-1.5 sm:p-2 rounded-xl bg-white text-[#111111] hover:bg-gray-100 transition-colors shrink-0"
-                      title="Edit attendance"
-                      aria-label="Edit attendance"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                        {/* Streak */}
+                        <div className="hidden sm:flex items-center gap-1 text-xs text-[#111111] font-semibold bg-white px-2 py-1 rounded-lg shrink-0">
+                          <Flame className="w-3.5 h-3.5 text-[#D4202C]" />
+                          <span>{row.streak}d</span>
+                        </div>
+
+                        {/* Edit button */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEditingStudent({
+                              studentId: row.studentId,
+                              studentName: row.studentName,
+                              status: row.status,
+                              level: row.level,
+                              note: row.note,
+                            })
+                          }
+                          className="p-1.5 sm:p-2 rounded-xl bg-white text-[#111111] hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
+                          title="Edit today's attendance"
+                          aria-label="Edit today's attendance"
+                        >
+                          <Edit3 className="w-3.5 h-3.5 text-[#D4202C]" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* Admin edit attendance modal */}
       {editingStudent && (
@@ -408,7 +513,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                     }
                     className={`py-2 rounded-xl text-xs font-semibold ${
                       editingStudent.status === 'present'
-                        ? 'bg-[#D93F3B] text-white'
+                        ? 'bg-[#D4202C] text-white'
                         : 'bg-[#F3F4F6] text-[#111111]'
                     }`}
                   >
@@ -489,7 +594,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                 <button
                   type="submit"
                   disabled={editSaving}
-                  className="px-4 py-2 rounded-xl bg-[#D93F3B] text-white text-xs font-semibold hover:opacity-95 disabled:opacity-50"
+                  className="px-4 py-2 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-white text-xs font-semibold disabled:opacity-50"
                 >
                   {editSaving ? 'Saving...' : 'Save change'}
                 </button>

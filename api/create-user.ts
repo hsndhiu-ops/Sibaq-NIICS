@@ -70,7 +70,41 @@ export default async function handler(req: any, res: any) {
       },
     });
 
-    // 5. Map username to internal email format
+    // 5. Verify caller is an authenticated administrator
+    const isExpressAdmin = req.user && req.user.role === 'admin';
+    if (!isExpressAdmin) {
+      const authHeader = req.headers?.authorization || req.headers?.Authorization;
+      const token = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7).trim()
+        : '';
+
+      if (!token) {
+        return res.status(401).json({
+          error: 'Unauthorized: Missing login session token.',
+        });
+      }
+
+      const { data: callerData, error: callerError } = await supabaseAdmin.auth.getUser(token);
+      if (callerError || !callerData?.user) {
+        return res.status(401).json({
+          error: 'Unauthorized: Invalid or expired session.',
+        });
+      }
+
+      const { data: callerProfile, error: profileCheckError } = await supabaseAdmin
+        .from('profiles')
+        .select('role')
+        .eq('id', callerData.user.id)
+        .single();
+
+      if (profileCheckError || callerProfile?.role !== 'admin') {
+        return res.status(403).json({
+          error: 'Forbidden: Only administrators can create accounts.',
+        });
+      }
+    }
+
+    // 6. Map username to internal email format
     const internalEmail = `${username.toLowerCase()}@accounts.sibaq.internal`;
 
     // 6. Create user in Supabase Auth via Admin API

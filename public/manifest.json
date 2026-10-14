@@ -1,21 +1,29 @@
 {
-  "short_name": "DHIU Arts Fest",
-  "name": "DHIU Arts Fest Preparation Tracker",
+  "short_name": "SIBAQ'26",
+  "name": "SIBAQ'26",
   "icons": [
     {
       "src": "/icon-192.png",
       "type": "image/png",
-      "sizes": "192x192"
+      "sizes": "192x192",
+      "purpose": "any"
     },
     {
       "src": "/icon-512.png",
       "type": "image/png",
-      "sizes": "512x512"
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
     }
   ],
   "start_url": "/",
   "background_color": "#FFFFFF",
-  "theme_color": "#EF4B47",
+  "theme_color": "#D4202C",
   "display": "standalone",
   "orientation": "portrait"
 }

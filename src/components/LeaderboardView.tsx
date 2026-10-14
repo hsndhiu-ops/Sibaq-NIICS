@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { LeaderboardEntry } from '../types';
 import { api } from '../api';
-import { Flame, Trophy } from 'lucide-react';
+import { Flame } from 'lucide-react';
+import { Pentagon } from './brand/Decorations';
 
 interface LeaderboardViewProps {
   currentStudentId?: string;
@@ -31,7 +32,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
   return (
     <div className="space-y-5 pb-20">
       <div>
-        <h2 className="text-2xl font-bold text-[#111111] tracking-tight">Leaderboard</h2>
+        <h2 className="font-serif text-[28px] sm:text-[34px] font-normal text-[#111111] leading-tight">
+          Leaderboard
+        </h2>
         <p className="text-xs text-[#6B7280]">
           Total preparation points and active streaks across all students
         </p>
@@ -46,8 +49,9 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
           {error}
         </div>
       ) : entries.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-          No participants scored yet.
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280] flex flex-col items-center justify-center">
+          <Pentagon size={64} className="mb-3" />
+          <p>No participants scored yet.</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -58,16 +62,16 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
                 key={entry.studentId}
                 className={`p-3.5 sm:p-4 rounded-2xl flex items-center justify-between gap-2.5 sm:gap-3 transition-colors ${
                   isMe
-                    ? 'bg-[#F3F4F6] border-2 border-[#EF4B47]'
+                    ? 'bg-[#F3F4F6] border-2 border-[#D4202C]'
                     : 'bg-[#F3F4F6]'
                 }`}
               >
                 {/* Rank & Student Name */}
                 <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                   <div
-                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs ${
+                    className={`w-7 h-7 sm:w-8 sm:h-8 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
                       entry.rank === 1
-                        ? 'bg-[#EF4B47] text-white shadow-sm'
+                        ? 'bg-[#D4202C] text-white'
                         : entry.rank === 2
                         ? 'bg-[#111111] text-white'
                         : entry.rank === 3
@@ -86,13 +90,13 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
                     <div className="font-bold text-xs sm:text-sm text-[#111111] truncate flex items-center gap-1.5">
                       <span className="truncate">{entry.fullName}</span>
                       {isMe && (
-                        <span className="text-[10px] sm:text-[11px] font-semibold text-[#EF4B47] shrink-0">
+                        <span className="text-xs font-semibold text-[#D4202C] shrink-0">
                           (You)
                         </span>
                       )}
                     </div>
                     {entry.programs.length > 0 && (
-                      <div className="text-[11px] sm:text-xs text-[#6B7280] truncate mt-0.5">
+                      <div className="text-xs sm:text-[13px] text-[#6B7280] truncate mt-0.5">
                         {entry.programs.join(', ')}
                       </div>
                     )}
@@ -103,7 +107,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0 text-right">
                   {/* Streak */}
                   <div className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white text-xs font-semibold text-[#111111]">
-                    <Flame className="w-3.5 h-3.5 text-[#EF4B47]" />
+                    <Flame className="w-3.5 h-3.5 text-[#D4202C]" />
                     <span>{entry.streak}d</span>
                   </div>
 
@@ -112,7 +116,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
                     <span className="font-extrabold text-sm sm:text-base text-[#111111]">
                       {entry.totalPoints}
                     </span>
-                    <span className="text-[11px] sm:text-xs text-[#6B7280] ml-0.5">pts</span>
+                    <span className="text-xs text-[#6B7280] ml-0.5">pts</span>
                   </div>
                 </div>
               </div>

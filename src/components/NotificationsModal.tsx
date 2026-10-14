@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppNotification } from '../types';
-import { X, Check } from 'lucide-react';
+import { X } from 'lucide-react';
+import { Pentagon } from './brand/Decorations';
 
 interface NotificationsModalProps {
   isOpen: boolean;
@@ -28,7 +29,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col shadow-xl overflow-hidden">
+      <div className="bg-white rounded-2xl w-full max-w-md max-h-[85vh] flex flex-col border border-[#E5E7EB] overflow-hidden">
         {/* Header */}
         <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
           <div>
@@ -41,7 +42,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
             {notifications.some((n) => !n.read) && (
               <button
                 onClick={onMarkAllRead}
-                className="text-xs font-semibold text-[#EF4B47] hover:underline px-2 py-1"
+                className="text-xs font-semibold text-[#D4202C] hover:underline px-2 py-1"
               >
                 Mark all read
               </button>
@@ -59,22 +60,23 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
         {/* Content list */}
         <div className="p-4 overflow-y-auto space-y-3 flex-1">
           {notifications.length === 0 ? (
-            <div className="text-center py-10 text-[#6B7280] text-sm">
-              No notifications yet.
+            <div className="text-center py-10 text-[#6B7280] text-sm flex flex-col items-center justify-center">
+              <Pentagon size={64} className="mb-3" />
+              <p>No notifications yet.</p>
             </div>
           ) : (
             notifications.map((n) => (
               <div
                 key={n.id}
                 className={`p-3 rounded-xl transition-colors ${
-                  n.read ? 'bg-[#F3F4F6]' : 'bg-[#F3F4F6] border-l-4 border-[#EF4B47]'
+                  n.read ? 'bg-[#F3F4F6]' : 'bg-[#F3F4F6] border-l-4 border-[#D4202C]'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2 mb-1">
                   <h4 className="text-sm font-semibold text-[#111111]">
                     {n.title}
                   </h4>
-                  <span className="text-[11px] text-[#6B7280] whitespace-nowrap">
+                  <span className="text-xs text-[#6B7280] whitespace-nowrap">
                     {formatDate(n.createdAt)}
                   </span>
                 </div>

@@ -13,6 +13,7 @@ import fileRouter from './server/routes/fileRouter';
 import createUserHandler from './api/create-user';
 import resetPasswordHandler from './api/reset-password';
 import updateUserHandler from './api/update-user';
+import assignGuideHandler from './api/assign-guide';
 import purgeScreenshotsHandler from './api/purge-screenshots';
 import {
   startBackgroundJobs,
@@ -49,6 +50,8 @@ async function startServer() {
   app.post('/api/create-user', createUserHandler);
   app.post('/api/reset-password', resetPasswordHandler);
   app.post('/api/update-user', updateUserHandler);
+  app.post('/api/assign-guide', assignGuideHandler);
+  app.post('/api/admin/assign-guide', assignGuideHandler);
   app.all('/api/purge-screenshots', purgeScreenshotsHandler);
   app.all('/api/admin/purge-screenshots', purgeScreenshotsHandler);
 

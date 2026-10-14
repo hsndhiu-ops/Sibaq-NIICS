@@ -380,6 +380,10 @@ class Database {
       .sort((a, b) => b.date.localeCompare(a.date));
   }
 
+  public getAllAttendance(): AttendanceRecord[] {
+    return this.data.attendance;
+  }
+
   /**
    * Streak calculation following the exact spec:
    * "Daily attendance drives streaks. A streak is the number of consecutive days marked PRESENT.
@@ -620,7 +624,7 @@ class Database {
     });
 
     // Email dispatch (or console log if no SMTP configured)
-    const guideEmail = guide?.email || 'guide@dhiu.in';
+    const guideEmail = guide?.email || 'guide@gmail.com';
     console.log(
       `[EMAIL DISPATCH] To: ${guideEmail} | Subject: New task submission: "${task.title}" | Body: ${studentName} has submitted "${task.title}" at ${submittedTime}. Please review or meet the student before completing.`
     );
@@ -658,7 +662,7 @@ class Database {
     });
 
     // Email dispatch to student
-    const studentEmail = student?.email || `${student?.username || 'student'}@dhiu.in`;
+    const studentEmail = student?.email || `${student?.username || 'student'}@gmail.com`;
     console.log(
       `[EMAIL DISPATCH] To: ${studentEmail} | Subject: Task Completed: "${task.title}" | Body: Your task "${task.title}" was verified and marked completed by ${actor?.fullName || 'your reviewer'}.${task.reviewerNote ? ` Note: ${task.reviewerNote}` : ''}`
     );
@@ -696,7 +700,7 @@ class Database {
     });
 
     // Email dispatch to student
-    const studentEmail = student?.email || `${student?.username || 'student'}@dhiu.in`;
+    const studentEmail = student?.email || `${student?.username || 'student'}@gmail.com`;
     console.log(
       `[EMAIL DISPATCH] To: ${studentEmail} | Subject: Task Returned: "${task.title}" | Body: Your task "${task.title}" was sent back by ${actor?.fullName || 'your reviewer'}. Feedback: "${note.trim()}". Please revise and mark as done.`
     );

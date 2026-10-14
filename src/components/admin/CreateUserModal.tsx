@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, UserPlus, AlertCircle, Loader2 } from 'lucide-react';
 import { User } from '../../types';
+import { api } from '../../api';
 
 interface CreateUserModalProps {
   isOpen: boolean;
@@ -73,31 +74,25 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
       return;
     }
 
+    if (notificationEmail.trim()) {
+      const gmailRegex = /^[a-zA-Z0-9._%+-]+@gmail\.com$/i;
+      if (!gmailRegex.test(notificationEmail.trim())) {
+        setErrorMessage('Enter a valid Gmail address');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
 
     try {
-      // 2. Explicit fetch call to /api/create-user
-      const response = await fetch('/api/create-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: trimmedUsername,
-          password: password,
-          fullName: trimmedFullName,
-          role,
-          notificationEmail: notificationEmail.trim() || undefined,
-          assignedGuideId: role === 'student' && assignedGuideId ? assignedGuideId : undefined,
-        }),
+      await api.createAccount({
+        username: trimmedUsername,
+        password: password,
+        fullName: trimmedFullName,
+        role,
+        notificationEmail: notificationEmail.trim() || undefined,
+        assignedGuideId: role === 'student' && assignedGuideId ? assignedGuideId : undefined,
       });
-
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        const errorDetail = data?.error || `Request failed with status ${response.status}`;
-        throw new Error(errorDetail);
-      }
 
       // 3. Reset form, close modal, and refresh user list
       resetForm();
@@ -105,7 +100,6 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
       onNotify(`Account created successfully for ${trimmedFullName}.`);
       onSuccess();
     } catch (err: any) {
-      console.error('Error creating user account:', err);
       setErrorMessage(err.message || 'An unexpected error occurred while creating the account.');
     } finally {
       setIsSubmitting(false);
@@ -123,15 +117,15 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
         {/* Header */}
         <div className="p-4 sm:p-5 border-b border-[#F3F4F6] flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-[#FEE2E2] text-[#EF4B47] flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-xl bg-[#F3F4F6] text-[#D4202C] flex items-center justify-center shrink-0">
               <UserPlus className="w-4 h-4" />
             </div>
             <div>
               <h3 id="create-user-modal-title" className="font-bold text-base text-[#111111]">
                 Create User Account
               </h3>
-              <p className="text-xs text-[#6B7280]">
-                Add candidate student or supervisor guide
+              <p className="text-[13px] text-[#6B7280]">
+                Add student or supervisor guide
               </p>
             </div>
           </div>
@@ -151,10 +145,10 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
           {/* Explicit Error Display */}
           {errorMessage && (
             <div
-              className="p-3.5 rounded-xl bg-[#FEF2F2] border border-[#FCA5A5] flex items-start gap-2.5 text-[#B91C1C] text-xs font-medium leading-relaxed animate-in fade-in"
+              className="p-3 rounded-xl bg-white border border-[#E5E7EB] flex items-center gap-2 text-[#111111] text-xs font-medium leading-relaxed"
               role="alert"
             >
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <AlertCircle className="w-4 h-4 shrink-0 text-[#D4202C]" />
               <div className="flex-1">
                 <span>{errorMessage}</span>
               </div>
@@ -173,7 +167,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
                 disabled={isSubmitting}
                 className={`py-2 rounded-lg text-xs font-semibold transition-all ${
                   role === 'student'
-                    ? 'bg-[#EF4B47] text-white shadow-xs'
+                    ? 'bg-[#D4202C] text-white'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -185,7 +179,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
                 disabled={isSubmitting}
                 className={`py-2 rounded-lg text-xs font-semibold transition-all ${
                   role === 'guide'
-                    ? 'bg-[#EF4B47] text-white shadow-xs'
+                    ? 'bg-[#D4202C] text-white'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -197,7 +191,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
           {/* Full name */}
           <div>
             <label className="block text-xs font-semibold text-[#111111] mb-1">
-              Full Name <span className="text-[#EF4B47]">*</span>
+              Full Name <span className="text-[#D4202C]">*</span>
             </label>
             <input
               type="text"
@@ -209,14 +203,14 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
               placeholder="e.g. Ahmad Shafi"
               required
               disabled={isSubmitting}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#EF4B47] focus:bg-white outline-hidden transition-all disabled:opacity-60"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#D4202C] focus:bg-white outline-hidden transition-all disabled:opacity-60"
             />
           </div>
 
           {/* Username / Roll ID */}
           <div>
             <label className="block text-xs font-semibold text-[#111111] mb-1">
-              Username / Roll ID <span className="text-[#EF4B47]">*</span>
+              Username / Roll ID <span className="text-[#D4202C]">*</span>
             </label>
             <input
               type="text"
@@ -228,9 +222,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
               placeholder="e.g. DH2401 or u_guide1"
               required
               disabled={isSubmitting}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#EF4B47] focus:bg-white outline-hidden transition-all disabled:opacity-60"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#D4202C] focus:bg-white outline-hidden transition-all disabled:opacity-60"
             />
-            <p className="text-[11px] text-[#6B7280] mt-1">
+            <p className="text-[13px] text-[#6B7280] mt-1">
               Used for login. Will be provisioned as <span className="font-mono text-[#111111]">{username.trim() ? username.trim().toLowerCase() : '<username>'}@accounts.sibaq.internal</span>
             </p>
           </div>
@@ -239,9 +233,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="block text-xs font-semibold text-[#111111]">
-                Initial Password <span className="text-[#EF4B47]">*</span>
+                Initial Password <span className="text-[#D4202C]">*</span>
               </label>
-              <span className="text-[11px] text-[#6B7280]">
+              <span className="text-xs text-[#6B7280]">
                 Min. 6 characters
               </span>
             </div>
@@ -256,7 +250,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
               required
               minLength={6}
               disabled={isSubmitting}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#EF4B47] focus:bg-white outline-hidden transition-all disabled:opacity-60"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#D4202C] focus:bg-white outline-hidden transition-all disabled:opacity-60"
             />
           </div>
 
@@ -271,9 +265,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
               onChange={(e) => setNotificationEmail(e.target.value)}
               placeholder="student@gmail.com"
               disabled={isSubmitting}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#EF4B47] focus:bg-white outline-hidden transition-all disabled:opacity-60"
+              className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#D4202C] focus:bg-white outline-hidden transition-all disabled:opacity-60"
             />
-            <p className="text-[11px] text-[#6B7280] mt-1">
+            <p className="text-[13px] text-[#6B7280] mt-1">
               Used for daily task and attendance alert notifications
             </p>
           </div>
@@ -288,7 +282,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
                 value={assignedGuideId}
                 onChange={(e) => setAssignedGuideId(e.target.value)}
                 disabled={isSubmitting}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#EF4B47] focus:bg-white outline-hidden transition-all disabled:opacity-60"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#D4202C] focus:bg-white outline-hidden transition-all disabled:opacity-60"
               >
                 <option value="">Unassigned</option>
                 {guides.map((g) => (
@@ -313,7 +307,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-5 py-2.5 rounded-xl bg-[#EF4B47] text-white text-xs font-semibold hover:opacity-95 active:scale-[0.98] transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2 shadow-xs"
+              className="h-12 px-5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-white text-xs font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {isSubmitting ? (
                 <>

@@ -5,15 +5,17 @@ import { requireAdmin, AuthenticatedRequest } from '../auth';
 import createUserHandler from '../../api/create-user';
 import resetPasswordHandler from '../../api/reset-password';
 import updateUserHandler from '../../api/update-user';
+import assignGuideHandler from '../../api/assign-guide';
 
 const router = Router();
+
+// Strictly enforce admin session authentication for all routes
+router.use(requireAdmin);
 
 // Mount serverless endpoints with direct handler support
 router.post('/create-user', createUserHandler);
 router.post('/reset-password', resetPasswordHandler);
 router.post('/update-user', updateUserHandler);
-
-router.use(requireAdmin);
 
 // Today overview & date picker data
 router.get('/overview', (req, res) => {
@@ -271,21 +273,24 @@ router.post('/accounts/:id/reset-password', async (req, res) => {
   }
 });
 
-// Secret operation: Admin create user
-router.post('/create-user', async (req, res) => {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return res.status(501).json({ error: 'Not available yet' });
-  }
-  // When user configures Supabase Service Role Key, this can call Supabase Admin Auth API
-  return res.status(501).json({ error: 'Not available yet' });
-});
-
-// Secret operation: Admin reset password
-router.post('/reset-password', async (req, res) => {
-  if (!process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return res.status(501).json({ error: 'Not available yet' });
-  }
-  return res.status(501).json({ error: 'Not available yet' });
+// Attendance raw export data (Admin only)
+router.get('/attendance-export', (req, res) => {
+  const users = db.getUsers();
+  const userMap = new Map(users.map((u) => [u.id, u]));
+  const att = db.getAllAttendance();
+  const rows = att.map((a) => {
+    const student = userMap.get(a.studentId);
+    const guide = student?.guideId ? userMap.get(student.guideId) : null;
+    return {
+      student: student?.fullName || student?.username || a.studentId,
+      guide: guide?.fullName || guide?.username || 'Unassigned',
+      date: a.date,
+      status: a.status,
+      level: a.level || '',
+      points: a.points ?? 0,
+    };
+  });
+  res.json({ rows });
 });
 
 // Programs: list
@@ -335,25 +340,9 @@ router.delete('/programs/:id', (req, res) => {
 });
 
 // Assign guide to students
-router.post('/assign-guide', async (req, res) => {
-  const { studentIds, guideId } = req.body;
-  if (!Array.isArray(studentIds) || !guideId) {
-    return res.status(400).json({ error: 'studentIds array and guideId are required.' });
-  }
+router.post('/assign-guide', assignGuideHandler);
 
-  const guide = db.findUserById(guideId);
-  if (!guide || guide.role !== 'guide') {
-    return res.status(400).json({ error: 'Invalid guide specified.' });
-  }
-
-  for (const sId of studentIds) {
-    await db.updateUser(sId, { guideId });
-  }
-
-  res.json({ success: true, message: `Assigned ${studentIds.length} students to guide ${guide.fullName}.` });
-});
-
-// Assign programs to candidate(s)
+// Assign programs to student(s)
 router.post('/assign-programs', (req, res) => {
   const { studentId, programIds, bulkStudentIds, programId } = req.body;
 
@@ -531,7 +520,7 @@ router.get('/export-excel', (req, res) => {
 
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename=DHIU_Arts_Fest_Report_${today}.xlsx`);
+  res.setHeader('Content-Disposition', `attachment; filename=SIBAQ26_Report_${today}.xlsx`);
   res.send(buf);
 });
 
