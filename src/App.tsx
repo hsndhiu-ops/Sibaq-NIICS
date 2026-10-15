@@ -571,6 +571,7 @@ export default function App() {
         <AdminStudentDrillDown
           studentId={drillDownStudentId}
           onClose={() => setDrillDownStudentId(null)}
+          onNotify={(msg) => showToast(msg)}
         />
       )}
 

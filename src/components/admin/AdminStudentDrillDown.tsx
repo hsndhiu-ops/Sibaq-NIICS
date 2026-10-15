@@ -20,16 +20,19 @@ import {
   ZoomOut,
   Search,
   UserMinus,
+  Trash2,
 } from 'lucide-react';
 
 interface AdminStudentDrillDownProps {
   studentId: string;
   onClose: () => void;
+  onNotify?: (msg: string) => void;
 }
 
 export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
   studentId,
   onClose,
+  onNotify,
 }) => {
   const [data, setData] = useState<{
     student: User;
@@ -112,6 +115,30 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
   const [guideModalError, setGuideModalError] = useState<string | null>(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
   const [actionNotification, setActionNotification] = useState<string | null>(null);
+
+  // Delete student confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingStudent, setIsDeletingStudent] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const handleDeleteStudent = async () => {
+    if (!data?.student) return;
+    setIsDeletingStudent(true);
+    setDeleteError(null);
+
+    const studentName = data.student.fullName;
+    try {
+      await api.deleteAccount(data.student.id);
+      setIsDeletingStudent(false);
+      setShowDeleteConfirm(false);
+      onNotify?.(`${studentName} has been deleted.`);
+      onClose();
+    } catch (err: any) {
+      console.error('[deleteAccount] error:', err.message || err);
+      setDeleteError(err.message || "Couldn't delete student. Try again.");
+      setIsDeletingStudent(false);
+    }
+  };
 
   useEffect(() => {
     loadStudentDetail();
@@ -353,13 +380,27 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
               )}
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors shrink-0"
-            aria-label="Close"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setShowDeleteConfirm(true);
+                setDeleteError(null);
+              }}
+              className="p-1.5 rounded-xl bg-white border border-[#E5E7EB] hover:bg-red-50 hover:border-red-200 text-[#D4202C] transition-colors cursor-pointer"
+              title="Delete student"
+              aria-label="Delete student"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors shrink-0 cursor-pointer"
+              aria-label="Close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Action Notification Banner */}
@@ -1151,6 +1192,69 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                 className="px-4 py-2 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
               >
                 {isGuideSubmitting ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Student Confirmation Modal */}
+      {showDeleteConfirm && data?.student && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-[#D4202C] shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteError(null);
+                }}
+                className="p-1 rounded-lg text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <h3 className="font-bold text-lg text-[#111111]">
+                Delete Student?
+              </h3>
+              <p className="text-xs sm:text-sm text-[#6B7280] mt-1.5 leading-relaxed">
+                Are you sure you want to delete <strong className="text-[#111111]">{data.student.fullName}</strong> ({data.student.username})? All attendance records, submitted tasks, and program enrollments for this student will be permanently deleted. This action cannot be undone.
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isDeletingStudent}
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setDeleteError(null);
+                }}
+                className="px-4 py-2.5 rounded-[10px] text-xs sm:text-sm font-semibold text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteStudent}
+                disabled={isDeletingStudent}
+                className="px-5 py-2.5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs sm:text-sm font-semibold cursor-pointer disabled:opacity-50 flex items-center gap-2 transition-colors"
+              >
+                {isDeletingStudent ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>

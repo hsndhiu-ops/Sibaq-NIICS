@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User } from '../../types';
 import { api } from '../../api';
 import { supabase } from '../../lib/supabase';
-import { Plus, Key, Edit, X, UserPlus, AlertCircle, Search, UserMinus } from 'lucide-react';
+import { Plus, Key, Edit, X, UserPlus, AlertCircle, Search, UserMinus, Trash2 } from 'lucide-react';
 import { CreateUserModal } from './CreateUserModal';
 import { Pentagon } from '../brand/Decorations';
 
@@ -43,6 +43,12 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
   const [isGuideSubmitting, setIsGuideSubmitting] = useState(false);
   const [guidePickerError, setGuidePickerError] = useState<string | null>(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+
+  // Delete user confirmation state
+  const [deleteTargetUser, setDeleteTargetUser] = useState<User | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
 
   useEffect(() => {
     loadAccounts();
@@ -191,6 +197,27 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
     onNotify(`Removed ${studentName} from ${oldGuideName}.`);
   };
 
+  const handleDeleteUser = async () => {
+    if (!deleteTargetUser) return;
+    setDeleteSubmitting(true);
+    setDeleteError(null);
+
+    const targetName = deleteTargetUser.fullName || deleteTargetUser.username;
+    try {
+      await api.deleteAccount(deleteTargetUser.id);
+      const msg = `${targetName} has been deleted.`;
+      setDeleteTargetUser(null);
+      setDeleteSubmitting(false);
+      setDeletedNotice(msg);
+      onNotify(msg);
+      await loadAccounts();
+    } catch (err: any) {
+      console.error('[deleteAccount] error:', err.message || err);
+      setDeleteError(err.message || "Couldn't delete account. Try again.");
+      setDeleteSubmitting(false);
+    }
+  };
+
   const normalizeText = (text: string): string => {
     return (text || '')
       .normalize('NFD')
@@ -248,6 +275,24 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
           <span>Create account</span>
         </button>
       </div>
+
+      {/* Deleted notification banner */}
+      {deletedNotice && (
+        <div className="p-4 rounded-xl bg-green-50 border border-green-200 text-green-900 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-green-600 shrink-0"></span>
+            <span>{deletedNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDeletedNotice(null)}
+            className="p-1 rounded-md text-green-700 hover:text-green-900 hover:bg-green-100 transition-colors cursor-pointer"
+            title="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* Search box and three-way switch */}
       <div className="space-y-3">
@@ -444,11 +489,24 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                     setResetTargetUser(user);
                     setResetPasswordVal('');
                   }}
-                  className="p-2 rounded-xl bg-white text-[#111111] hover:bg-gray-100"
+                  className="p-2 rounded-xl bg-white text-[#111111] hover:bg-gray-100 transition-colors cursor-pointer"
                   title="Reset password"
                 >
                   <Key className="w-3.5 h-3.5 text-[#D4202C]" />
                 </button>
+                {(user.role === 'student' || user.role === 'guide') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeleteTargetUser(user);
+                      setDeleteError(null);
+                    }}
+                    className="p-2 rounded-xl bg-white text-[#D4202C] hover:bg-red-50 hover:text-[#B81B26] transition-colors cursor-pointer"
+                    title={`Delete ${user.role === 'guide' ? 'guide' : 'student'}`}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -829,6 +887,72 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                 className="px-4 py-2 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
               >
                 {isGuideSubmitting ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete User Confirmation Modal */}
+      {deleteTargetUser && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
+            <div className="flex items-start justify-between">
+              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-[#D4202C] shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <button
+                type="button"
+                disabled={deleteSubmitting}
+                onClick={() => {
+                  setDeleteTargetUser(null);
+                  setDeleteError(null);
+                }}
+                className="p-1 rounded-lg text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+                aria-label="Close"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <h3 className="font-bold text-lg text-[#111111]">
+                Delete {deleteTargetUser.role === 'guide' ? 'Guide' : 'Student'}?
+              </h3>
+              <p className="text-xs sm:text-sm text-[#6B7280] mt-1.5 leading-relaxed">
+                Are you sure you want to delete <strong className="text-[#111111]">{deleteTargetUser.fullName}</strong> ({deleteTargetUser.username})?
+                {deleteTargetUser.role === 'guide'
+                  ? ' Any students currently assigned to this guide will become unassigned. This action cannot be undone.'
+                  : ' All attendance records, submitted tasks, and program enrollments for this student will be permanently deleted. This action cannot be undone.'}
+              </p>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={deleteSubmitting}
+                onClick={() => {
+                  setDeleteTargetUser(null);
+                  setDeleteError(null);
+                }}
+                className="px-4 py-2.5 rounded-[10px] text-xs sm:text-sm font-semibold text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteUser}
+                disabled={deleteSubmitting}
+                className="px-5 py-2.5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs sm:text-sm font-semibold cursor-pointer disabled:opacity-50 flex items-center gap-2 transition-colors"
+              >
+                {deleteSubmitting ? 'Deleting...' : 'Delete'}
               </button>
             </div>
           </div>

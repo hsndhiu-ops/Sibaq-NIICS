@@ -1653,6 +1653,20 @@ export const api = {
     });
   },
 
+  deleteAccount: async (id: string): Promise<{ success: boolean; message: string; user?: any }> => {
+    return callSecretServerEndpoint<{ success: boolean; message: string; user?: any }>('/api/delete-user', {
+      method: 'POST',
+      body: JSON.stringify({ userId: id }),
+    });
+  },
+
+  deleteUser: async (id: string): Promise<{ success: boolean; message: string; user?: any }> => {
+    return callSecretServerEndpoint<{ success: boolean; message: string; user?: any }>('/api/delete-user', {
+      method: 'POST',
+      body: JSON.stringify({ userId: id }),
+    });
+  },
+
   getAdminPrograms: async () => {
     const { data: programRows, error } = await supabase
       .from(TABLES.PROGRAMS)
