@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../api';
+import { supabase } from '../../lib/supabase';
 import { AttendanceRecord, Program, RemarkRecord, ScreenshotRecord, TaskRecord, User } from '../../types';
 import {
   X,
@@ -17,6 +18,8 @@ import {
   Loader2,
   ZoomIn,
   ZoomOut,
+  Search,
+  UserMinus,
 } from 'lucide-react';
 
 interface AdminStudentDrillDownProps {
@@ -98,20 +101,137 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
 
+  // Guide reassignment state
+  const [availableGuides, setAvailableGuides] = useState<
+    Array<{ id: string; fullName: string; username: string; studentCount: number }>
+  >([]);
+  const [isChangingGuide, setIsChangingGuide] = useState(false);
+  const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
+  const [guideSearchQuery, setGuideSearchQuery] = useState('');
+  const [isGuideSubmitting, setIsGuideSubmitting] = useState(false);
+  const [guideModalError, setGuideModalError] = useState<string | null>(null);
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [actionNotification, setActionNotification] = useState<string | null>(null);
+
   useEffect(() => {
     loadStudentDetail();
   }, [studentId]);
+
+  const loadAvailableGuides = async () => {
+    try {
+      const { data: allProfiles, error } = await supabase
+        .from('profiles')
+        .select('id, full_name, username, role, guide_id')
+        .order('full_name', { ascending: true });
+
+      if (error) {
+        console.error('[profiles] error loading guides:', error.message || error);
+        return;
+      }
+
+      const guideList = (allProfiles || []).filter((p) => p.role === 'guide');
+      const students = (allProfiles || []).filter((p) => p.role === 'student');
+      const counts = new Map<string, number>();
+      students.forEach((s) => {
+        if (s.guide_id) {
+          counts.set(s.guide_id, (counts.get(s.guide_id) || 0) + 1);
+        }
+      });
+
+      setAvailableGuides(
+        guideList.map((g) => ({
+          id: g.id,
+          fullName: g.full_name || g.username,
+          username: g.username,
+          studentCount: counts.get(g.id) || 0,
+        }))
+      );
+    } catch (err: any) {
+      console.error('[profiles] error:', err.message || err);
+    }
+  };
 
   const loadStudentDetail = async () => {
     setLoading(true);
     try {
       const res = await api.getAdminStudentDetail(studentId);
       setData(res);
+      await loadAvailableGuides();
     } catch (_err) {
       // Graceful error handling
     } finally {
       setLoading(false);
     }
+  };
+
+  const normalizeText = (text: string): string => {
+    return (text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\u02bb\u02bc\u02bd\u02be\u02bf\u2018\u2019'`ʾʿ]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const matchesSearch = (text: string, query: string): boolean => {
+    const cleanQuery = normalizeText(query);
+    if (!cleanQuery) return true;
+    return normalizeText(text).includes(cleanQuery);
+  };
+
+  const handleExecuteChangeGuide = async () => {
+    if (!data || !selectedGuideId) return;
+    setIsGuideSubmitting(true);
+    setGuideModalError(null);
+
+    const targetGuide = availableGuides.find((g) => g.id === selectedGuideId);
+    const targetName = targetGuide ? targetGuide.fullName : 'guide';
+
+    const { error } = await supabase.rpc('set_student_guide', {
+      p_student: data.student.id,
+      p_guide: selectedGuideId,
+    });
+
+    if (error) {
+      console.error('[set_student_guide] error:', error.message || error);
+      setGuideModalError(error.message || "Couldn't assign guide. Try again.");
+      setIsGuideSubmitting(false);
+      return;
+    }
+
+    setIsGuideSubmitting(false);
+    setIsChangingGuide(false);
+    setSelectedGuideId(null);
+    setGuideSearchQuery('');
+    setActionNotification(`Moved ${data.student.fullName} to ${targetName}.`);
+    await loadStudentDetail();
+  };
+
+  const handleExecuteRemoveGuide = async () => {
+    if (!data || !data.guide) return;
+    setIsGuideSubmitting(true);
+    setGuideModalError(null);
+
+    const oldGuideName = data.guide.fullName;
+
+    const { error } = await supabase.rpc('set_student_guide', {
+      p_student: data.student.id,
+      p_guide: null,
+    });
+
+    if (error) {
+      console.error('[set_student_guide] error:', error.message || error);
+      setGuideModalError(error.message || "Couldn't remove student. Try again.");
+      setIsGuideSubmitting(false);
+      return;
+    }
+
+    setIsGuideSubmitting(false);
+    setIsChangingGuide(false);
+    setShowRemoveConfirm(false);
+    setActionNotification(`Removed ${data.student.fullName} from ${oldGuideName}.`);
+    await loadStudentDetail();
   };
 
   const handleAdminReviewSubmit = async (e: React.FormEvent) => {
@@ -182,10 +302,56 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
             <h2 className="text-base sm:text-lg font-bold text-[#111111] truncate">
               {student.fullName}
             </h2>
-            <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-              Roll: {student.username} • Guide: {guide ? guide.fullName : 'Unassigned'}
-              {student.email ? ` • ${student.email}` : ''}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[13px] text-[#6B7280] mt-1">
+              <span>
+                Roll: <strong className="text-[#111111] font-semibold">{student.username}</strong>
+              </span>
+              <span>•</span>
+              <span className="inline-flex items-center gap-1.5">
+                Guide:{' '}
+                {guide ? (
+                  <>
+                    <strong className="text-[#111111] font-semibold">{guide.fullName}</strong>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangingGuide(true);
+                        setSelectedGuideId(null);
+                        setGuideSearchQuery('');
+                        setGuideModalError(null);
+                        setShowRemoveConfirm(false);
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-[#F3F4F6] hover:bg-gray-200 text-xs font-semibold text-[#111111] transition-colors cursor-pointer"
+                    >
+                      Change
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-[#D4202C] font-semibold">No guide</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsChangingGuide(true);
+                        setSelectedGuideId(null);
+                        setGuideSearchQuery('');
+                        setGuideModalError(null);
+                        setShowRemoveConfirm(false);
+                      }}
+                      className="px-2 py-0.5 rounded-md bg-[#D4202C] hover:bg-[#B81B26] text-xs font-semibold text-white transition-colors cursor-pointer"
+                    >
+                      Assign guide
+                    </button>
+                  </>
+                )}
+              </span>
+              {student.email && (
+                <>
+                  <span>•</span>
+                  <span>{student.email}</span>
+                </>
+              )}
+            </div>
           </div>
           <button
             onClick={onClose}
@@ -195,6 +361,20 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
             <X className="w-4 h-4" />
           </button>
         </div>
+
+        {/* Action Notification Banner */}
+        {actionNotification && (
+          <div className="mx-3.5 sm:mx-5 mt-3 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-semibold text-emerald-800 flex items-center justify-between">
+            <span>{actionNotification}</span>
+            <button
+              type="button"
+              onClick={() => setActionNotification(null)}
+              className="p-1 hover:bg-emerald-100 rounded-lg text-emerald-700 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Modal Body */}
         <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4 sm:space-y-6 flex-1">
@@ -791,6 +971,188 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Guide Picker Modal */}
+      {isChangingGuide && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base text-[#111111]">
+                  {guide ? 'Change guide' : 'Assign guide'}
+                </h3>
+                <p className="text-xs text-[#6B7280]">
+                  {student.fullName} ({student.username})
+                  {guide && ` • Current: ${guide.fullName}`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsChangingGuide(false)}
+                className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {guideModalError && (
+              <div className="mx-4 mt-3 p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{guideModalError}</span>
+              </div>
+            )}
+
+            {/* If currently assigned, allow Remove from this guide option */}
+            {guide && (
+              <div className="mx-4 mt-3 p-3 rounded-xl bg-[#F9FAFB] border border-[#E5E7EB] flex items-center justify-between gap-3">
+                <div className="text-xs text-[#6B7280]">
+                  Currently with <strong className="text-[#111111]">{guide.fullName}</strong>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowRemoveConfirm(true)}
+                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-[#D4202C] hover:bg-red-50 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <UserMinus className="w-3.5 h-3.5" />
+                  <span>Remove from guide</span>
+                </button>
+              </div>
+            )}
+
+            {/* Search box */}
+            <div className="p-4 pb-2">
+              <div className="relative">
+                <label htmlFor="drilldown-guide-search" className="sr-only">
+                  Search guides
+                </label>
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
+                <input
+                  id="drilldown-guide-search"
+                  type="text"
+                  value={guideSearchQuery}
+                  onChange={(e) => setGuideSearchQuery(e.target.value)}
+                  placeholder="Search guides by name or username"
+                  className="w-full h-[44px] pl-9 pr-9 rounded-[10px] bg-[#F3F4F6] text-xs sm:text-sm text-[#111111] placeholder:text-[#6B7280] border border-transparent focus:border-[#D4202C] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#D4202C]/20"
+                />
+                {guideSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setGuideSearchQuery('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6B7280] hover:text-[#111111]"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Guides List */}
+            <div className="px-4 py-2 overflow-y-auto flex-1 space-y-2">
+              {availableGuides
+                .filter((g) => {
+                  if (guide && g.id === guide.id) return false;
+                  if (!guideSearchQuery.trim()) return true;
+                  return (
+                    matchesSearch(g.fullName, guideSearchQuery) ||
+                    matchesSearch(g.username, guideSearchQuery)
+                  );
+                })
+                .map((g) => {
+                  const isSelected = selectedGuideId === g.id;
+                  return (
+                    <div
+                      key={g.id}
+                      onClick={() => setSelectedGuideId(g.id)}
+                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                        isSelected
+                          ? 'border-[#D4202C] bg-red-50/40 shadow-xs'
+                          : 'border-gray-200 bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
+                          {g.fullName}
+                        </div>
+                        <div className="text-xs text-[#6B7280]">
+                          Roll: {g.username}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#111111]">
+                          {g.studentCount} {g.studentCount === 1 ? 'student' : 'students'}
+                        </span>
+                        <div
+                          className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                            isSelected ? 'border-[#D4202C] bg-[#D4202C]' : 'border-gray-300'
+                          }`}
+                        >
+                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+
+            <div className="p-4 border-t border-[#F3F4F6] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsChangingGuide(false)}
+                className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteChangeGuide}
+                disabled={!selectedGuideId || isGuideSubmitting}
+                className="h-[44px] px-5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+              >
+                {isGuideSubmitting ? 'Saving...' : guide ? 'Move' : 'Assign'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove from guide confirmation dialog */}
+      {showRemoveConfirm && guide && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-5 space-y-4">
+            <h3 className="font-bold text-base text-[#111111]">
+              Remove from guide
+            </h3>
+            <p className="text-xs sm:text-sm text-[#111111] leading-relaxed">
+              Remove {student.fullName} from {guide.fullName}'s list? {guide.fullName} will no longer see this student. Open tasks stay with {guide.fullName}.
+            </p>
+
+            {guideModalError && (
+              <div className="p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{guideModalError}</span>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowRemoveConfirm(false)}
+                className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteRemoveGuide}
+                disabled={isGuideSubmitting}
+                className="px-4 py-2 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
+              >
+                {isGuideSubmitting ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
           </div>
         </div>
       )}
