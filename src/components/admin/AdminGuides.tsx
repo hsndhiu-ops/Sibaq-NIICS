@@ -323,7 +323,11 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
 
                   {/* Status chip / Remind button */}
                   <div className="shrink-0 flex items-center gap-2">
-                    {guide.allMarked && guide.sessionsCount > 0 ? (
+                    {guide.sessionsCount === 0 ? (
+                      <span className="text-xs text-[#6B7280] font-medium px-2 py-1">
+                        No sessions
+                      </span>
+                    ) : guide.allMarked ? (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-green-700 border border-green-200">
                         <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                         <span>All marked</span>

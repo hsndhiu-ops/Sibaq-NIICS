@@ -362,7 +362,9 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                         {g.markedCount} of {g.sessionsCount ?? g.menteesCount ?? 0} marked
                       </div>
                     </div>
-                    {!g.allMarked && (g.sessionsCount > 0 || g.menteesCount > 0) ? (
+                    {(g.sessionsCount ?? 0) === 0 ? (
+                      <span className="text-[#9CA3AF] text-xs px-2 py-1 shrink-0">-</span>
+                    ) : !g.allMarked ? (
                       <button
                         type="button"
                         onClick={() => handleRemindGuide(g.guideId)}
@@ -371,7 +373,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                         Remind
                       </button>
                     ) : (
-                      <span className="text-[#111111] font-semibold px-2 py-1 shrink-0">Done</span>
+                      <span className="text-green-700 font-semibold px-2 py-1 shrink-0">Done</span>
                     )}
                   </div>
                 ))}
@@ -401,6 +403,10 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                     ? row.sessions.some((s: any) => s.status === 'present')
                     : row.status === 'present';
 
+                  const hasExplicitAbsent = row.sessions
+                    ? row.sessions.some((s: any) => s.status === 'absent' && s.isMarked)
+                    : false;
+
                   const sessionsSummary = row.sessions && row.sessions.length > 0
                     ? row.sessions
                         .map(
@@ -408,9 +414,9 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                             `${s.programName}: ${
                               s.status === 'present'
                                 ? s.scoreLevel !== null
-                                  ? `Present ${s.scoreLevel}`
-                                  : 'Present'
-                                : 'Absent'
+                                  ? `Present · ${s.scoreLevel}`
+                                  : 'Not scored yet'
+                                : (s.isMarked ? 'Absent' : 'Not met yet')
                             }`
                         )
                         .join(' • ')
@@ -442,10 +448,14 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                             <Check className="w-3.5 h-3.5 stroke-[3]" />
                             Present
                           </span>
-                        ) : (
+                        ) : hasExplicitAbsent ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white text-[#6B7280] text-xs font-semibold shrink-0">
                             <span className="font-bold leading-none">-</span>
                             Absent
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white text-[#6B7280] text-xs font-medium shrink-0">
+                            Not met yet
                           </span>
                         )}
 

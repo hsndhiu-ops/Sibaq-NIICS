@@ -1353,10 +1353,10 @@ export const api = {
     const progMap = new Map<string, any>((programs || []).map((p) => [p.id, p]));
     const guideUserMap = new Map<string, any>(guides.map((g) => [g.id, g]));
 
-    // 3. Fetch today's attendance rows
+    // 3. Fetch today's attendance rows including marked_by and marked_at
     const { data: attRows, error: attErr } = await supabase
       .from(TABLES.ATTENDANCE)
-      .select('id, student_id, program_id, status, score_level, note, points')
+      .select('id, student_id, program_id, status, score_level, note, points, marked_by, marked_at')
       .eq(ATTENDANCE_COLS.DATE, date);
 
     if (attErr) console.error('[getAdminToday] attendance error:', attErr.message || attErr);
@@ -1384,11 +1384,11 @@ export const api = {
       students.map(async (st) => {
         const rows = attByStudent.get(st.id) || [];
         const hasPresent = rows.some((r) => r.status === 'present');
-        const hasSession = rows.length > 0;
+        const hasExplicitAbsent = rows.some((r) => r.status === 'absent' && (r.marked_by || r.marked_at));
 
         if (hasPresent) {
           presentStudentCount++;
-        } else if (hasSession) {
+        } else if (hasExplicitAbsent) {
           absentStudentCount++;
         }
 
@@ -1400,6 +1400,14 @@ export const api = {
           if (r.status === 'present' && scoreLevel === null) {
             unscoredSessionCount++;
           }
+
+          const isMarked = r.status === 'present'
+            ? scoreLevel !== null
+            : Boolean(r.marked_by || r.marked_at);
+
+          const displayStatus = r.status === 'present'
+            ? (scoreLevel !== null ? `Present · ${scoreLevel}` : 'Not scored yet')
+            : (isMarked ? 'Absent' : 'Not met yet');
 
           // Find guide for this program
           const pg = (pGuides || []).find((g) => g.program_id === r.program_id);
@@ -1414,6 +1422,8 @@ export const api = {
             level,
             points: r.points,
             note: r.note || null,
+            isMarked,
+            displayStatus,
           };
         });
 
@@ -1445,12 +1455,17 @@ export const api = {
       // All attendance rows for these programs today
       const gAttRows = (attRows || []).filter((a) => gPrograms.includes(a.program_id));
       const totalSessions = gAttRows.length;
-      const markedSessions = gAttRows.filter(
-        (a) => a.status === 'present' ? a.score_level !== null : true
-      ).length;
+
+      // Marked session: Present with score chosen, OR explicitly marked absent by guide/admin
+      const markedSessions = gAttRows.filter((a) => {
+        if (a.status === 'present') {
+          return a.score_level !== null && a.score_level !== undefined;
+        }
+        return Boolean(a.marked_by || a.marked_at);
+      }).length;
 
       const allMarked = totalSessions > 0 && markedSessions === totalSessions;
-      if (totalSessions > 0 && markedSessions === 0) {
+      if (totalSessions > 0 && !allMarked) {
         unmarkedGuidesCount++;
       }
 
@@ -1461,6 +1476,7 @@ export const api = {
         programsCount: gPrograms.length,
         sessionsCount: totalSessions,
         markedCount: markedSessions,
+        unmarkedCount: Math.max(0, totalSessions - markedSessions),
         allMarked,
       };
     });
@@ -1904,8 +1920,37 @@ export const api = {
       studentProgramsMap.get(pm.student_id)!.push({ id: pm.program_id, name, guideNames });
     }
 
+    // Build guide students map: guideId -> Set of unique studentIds
+    const guideStudentsMap = new Map<string, Set<string>>();
+    for (const pm of pmRows || []) {
+      const progGuides = (pgRows || []).filter((pg) => pg.program_id === pm.program_id);
+      for (const pg of progGuides) {
+        if (!guideStudentsMap.has(pg.guide_id)) guideStudentsMap.set(pg.guide_id, new Set<string>());
+        guideStudentsMap.get(pg.guide_id)!.add(pm.student_id);
+      }
+    }
+
+    const enrichedUsers = users.map((u) => {
+      if (u.role === 'guide') {
+        const progs = guideProgramsMap.get(u.id) || [];
+        const studentCount = guideStudentsMap.get(u.id)?.size || 0;
+        return {
+          ...u,
+          programs: progs,
+          studentCount,
+        };
+      } else if (u.role === 'student') {
+        const progs = studentProgramsMap.get(u.id) || [];
+        return {
+          ...u,
+          programs: progs,
+        };
+      }
+      return u;
+    });
+
     return {
-      accounts: users,
+      accounts: enrichedUsers,
       guideProgramsMap,
       studentProgramsMap,
     };
