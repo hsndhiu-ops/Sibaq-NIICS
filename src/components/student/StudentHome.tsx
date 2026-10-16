@@ -1,6 +1,6 @@
 import React from 'react';
 import { StudentDashboardData, TaskRecord } from '../../types';
-import { Check, Flame } from 'lucide-react';
+import { Check, Flame, Users } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface StudentHomeProps {
@@ -14,11 +14,10 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
   onOpenTaskModal,
   onNavigateToTab,
 }) => {
-  const { student, streak, totalPoints, rank, totalStudents, todayRecord, pendingTasks } = data;
+  const { student, streak, totalPoints, rank, totalStudents, todayPrograms, pendingTasks } = data;
 
-  const isPresent = todayRecord.status === 'present';
   const streakText = streak === 1 ? '1 day' : `${streak} days`;
-  const pointsText = totalPoints === 1 ? '1 point' : `${totalPoints} points`;
+  const pointsFormatted = Number(totalPoints).toFixed(1);
 
   return (
     <div className="space-y-6 pb-20">
@@ -40,18 +39,18 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
               {streak}
             </span>
           </div>
-          <div className="text-xs text-[#6B7280]">
-            {streakText}
-          </div>
+          <div className="text-xs text-[#6B7280]">{streakText}</div>
         </div>
 
-        {/* Total Points */}
+        {/* Total Points (formatted with one decimal) */}
         <div className="p-3.5 sm:p-4 rounded-2xl bg-[#F3F4F6] text-center flex flex-col justify-between">
           <div className="text-xs font-semibold text-[#6B7280]">Points</div>
           <div className="my-1 sm:my-1.5 text-2xl sm:text-3xl font-extrabold text-[#111111]">
-            {totalPoints}
+            {pointsFormatted}
           </div>
-          <div className="text-xs text-[#6B7280]">{pointsText}</div>
+          <div className="text-xs text-[#6B7280]">
+            {totalPoints === 1 ? '1.0 point' : `${pointsFormatted} points`}
+          </div>
         </div>
 
         {/* Rank */}
@@ -64,56 +63,81 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
         </div>
       </div>
 
-      {/* Today's status */}
+      {/* Today's status list of student's programs */}
       <div className="p-4 sm:p-5 rounded-2xl bg-[#F3F4F6] space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-xs font-bold text-[#6B7280]">
-            Today's status
+            Today's sessions
           </span>
-          <span className="text-xs text-[#6B7280] font-medium">{todayRecord.date}</span>
+          <span className="text-xs text-[#6B7280] font-medium">
+            {new Date().toLocaleDateString('en-GB', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+              timeZone: 'Asia/Kolkata',
+            })}
+          </span>
         </div>
 
-        <div className="flex items-center gap-3">
-          {!todayRecord.isMarked && !todayRecord.id ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white text-[#6B7280] font-semibold text-xs sm:text-sm">
-              <span className="font-bold text-base leading-none">•</span>
-              Not marked yet
-            </span>
-          ) : isPresent ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#D4202C] text-white font-semibold text-xs sm:text-sm">
-              <Check className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[3]" />
-              Present
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[#E5E7EB] text-[#111111] font-semibold text-xs sm:text-sm">
-              <span className="font-bold text-base leading-none">-</span>
-              Absent
-            </span>
-          )}
+        {!todayPrograms || todayPrograms.length === 0 ? (
+          <div className="p-4 rounded-xl bg-white text-center text-xs text-[#6B7280]">
+            No competition programs enrolled yet.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {todayPrograms.map((p) => {
+              const guideStr = (p.guideNames && p.guideNames.length > 0)
+                ? p.guideNames.join(', ')
+                : 'Guide not assigned';
 
-          {/* Points score once scored */}
-          {!todayRecord.isMarked && !todayRecord.id ? null : isPresent ? (
-            todayRecord.points !== null ? (
-              <span className="text-xs sm:text-sm font-bold text-[#111111]">
-                {todayRecord.points === 1 ? '1 point' : `${todayRecord.points} points`} ({todayRecord.level})
-              </span>
-            ) : (
-              <span className="text-xs sm:text-sm text-[#6B7280] font-normal">
-                Not scored yet
-              </span>
-            )
-          ) : (
-            <span className="text-xs sm:text-sm text-[#6B7280]">0 points</span>
-          )}
-        </div>
+              let statusText = 'Not marked yet';
+              let badgeColor = 'bg-[#F3F4F6] text-[#6B7280]';
 
-        {todayRecord.note && (
-          <p className="text-xs text-[#111111] bg-white p-2.5 rounded-xl">
-            <span className="font-semibold text-[#6B7280] block text-xs mb-0.5">
-              Guide note:
-            </span>
-            {todayRecord.note}
-          </p>
+              if (p.status === 'present') {
+                if (p.scoreLevel !== null && p.level) {
+                  statusText = `Present · ${p.level} (${p.scoreLevel})`;
+                  badgeColor = 'bg-[#D4202C] text-white';
+                } else {
+                  statusText = 'Present · Not scored yet';
+                  badgeColor = 'bg-[#D4202C] text-white';
+                }
+              } else if (p.status === 'absent') {
+                statusText = 'Absent';
+                badgeColor = 'bg-[#E5E7EB] text-[#111111]';
+              }
+
+              return (
+                <div
+                  key={p.programId}
+                  className="p-3.5 rounded-xl bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs border border-gray-100"
+                >
+                  <div className="min-w-0">
+                    <div className="font-bold text-sm text-[#111111]">
+                      {p.programName}
+                    </div>
+                    <div className="text-xs text-[#6B7280] mt-0.5">
+                      {guideStr}
+                    </div>
+                    {p.note && (
+                      <p className="text-xs text-[#111111] bg-[#F9FAFB] p-2 rounded-lg mt-1.5 border border-gray-100">
+                        <span className="text-[#6B7280] font-medium">Note: </span>
+                        {p.note}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="shrink-0 self-start sm:self-center">
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full font-semibold text-xs ${badgeColor}`}
+                    >
+                      {p.status === 'present' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                      <span>{statusText}</span>
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -123,7 +147,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
           <h3 className="text-base font-bold text-[#111111]">Tasks due</h3>
           <button
             onClick={() => onNavigateToTab('tasks')}
-            className="text-xs text-[#D4202C] font-semibold hover:underline"
+            className="text-xs text-[#D4202C] font-semibold hover:underline cursor-pointer"
           >
             View all ({pendingTasks.length})
           </button>
@@ -151,11 +175,17 @@ export const StudentHome: React.FC<StudentHomeProps> = ({
                     </p>
                   )}
                   <div className="text-xs text-[#6B7280] pt-0.5">
+                    {task.programName && (
+                      <>
+                        <span className="font-medium text-[#111111]">{task.programName}</span>
+                        <span> • </span>
+                      </>
+                    )}
                     Due date: <span className="text-[#111111] font-medium">{task.dueDate}</span>
                   </div>
                 </div>
 
-                {task.status === 'awaiting_review' ? (
+                {task.status === 'submitted' ? (
                   <span className="px-2.5 py-1 rounded-xl bg-white text-[#111111] border border-gray-200 text-xs font-semibold whitespace-nowrap shrink-0">
                     Awaiting review
                   </span>

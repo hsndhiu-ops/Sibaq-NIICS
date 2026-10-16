@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TaskRecord, User } from '../../types';
+import { TaskRecord } from '../../types';
 import { api } from '../../api';
 import {
   Plus,
@@ -10,6 +10,9 @@ import {
   AlertCircle,
   RotateCcw,
   Check,
+  CheckSquare,
+  Square,
+  ChevronDown,
 } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
@@ -17,14 +20,26 @@ interface GuideTasksProps {
   onNotify?: (msg: string) => void;
 }
 
+interface ProgramWithStudents {
+  programId: string;
+  programName: string;
+  kind: 'solo' | 'group';
+  students: Array<{
+    id: string;
+    fullName: string;
+    username: string;
+  }>;
+}
+
 export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
-  const [mentees, setMentees] = useState<User[]>([]);
+  const [programs, setPrograms] = useState<ProgramWithStudents[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Task creation modal state
   const [isCreatingTask, setIsCreatingTask] = useState(false);
-  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [selectedProgramId, setSelectedProgramId] = useState('');
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [dueDate, setDueDate] = useState('');
@@ -53,24 +68,76 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
         api.getGuideTasks(),
         api.getGuideMentees(),
       ]);
-      setTasks(tasksRes.tasks);
-      const menteeUsers = menteesRes.mentees.map((m) => m.student);
-      setMentees(menteeUsers);
+      setTasks(tasksRes.tasks || []);
 
-      if (menteeUsers.length > 0 && !selectedStudentId) {
-        setSelectedStudentId(menteeUsers[0].id);
+      const progs: ProgramWithStudents[] = (menteesRes.programs || []).map((p: any) => ({
+        programId: p.programId,
+        programName: p.programName,
+        kind: p.kind,
+        students: (p.students || []).map((s: any) => ({
+          id: s.id,
+          fullName: s.fullName,
+          username: s.username,
+        })),
+      }));
+
+      setPrograms(progs);
+
+      if (progs.length > 0 && !selectedProgramId) {
+        setSelectedProgramId(progs[0].programId);
+        setSelectedStudentIds(progs[0].students.map((s) => s.id));
       }
-    } catch (_err) {
-      // Graceful error handling
+    } catch (err: any) {
+      console.error('[loadData] error:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  const currentProgramStudents =
+    programs.find((p) => p.programId === selectedProgramId)?.students || [];
+
+  const handleProgramChange = (progId: string) => {
+    setSelectedProgramId(progId);
+    const prog = programs.find((p) => p.programId === progId);
+    if (prog) {
+      // Default to selecting all students in this program
+      setSelectedStudentIds(prog.students.map((s) => s.id));
+    } else {
+      setSelectedStudentIds([]);
+    }
+  };
+
+  const toggleStudentSelection = (stId: string) => {
+    setSelectedStudentIds((prev) =>
+      prev.includes(stId) ? prev.filter((id) => id !== stId) : [...prev, stId]
+    );
+  };
+
+  const selectAllStudentsInProgram = () => {
+    setSelectedStudentIds(currentProgramStudents.map((s) => s.id));
+  };
+
+  const deselectAllStudentsInProgram = () => {
+    setSelectedStudentIds([]);
+  };
+
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudentId || !title.trim()) {
-      setTaskError('Please select a student and provide a task title.');
+    if (!selectedProgramId) {
+      setTaskError('Please select a program.');
+      return;
+    }
+    if (selectedStudentIds.length === 0) {
+      setTaskError('Please select at least one student.');
+      return;
+    }
+    if (!title.trim()) {
+      setTaskError('Please provide a task title.');
+      return;
+    }
+    if (!dueDate) {
+      setTaskError('Please specify a due date.');
       return;
     }
 
@@ -78,12 +145,13 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
     setTaskError(null);
 
     try {
-      await api.createGuideTask({
-        studentId: selectedStudentId,
+      const res = await api.createGuideTask({
+        programId: selectedProgramId,
+        studentIds: selectedStudentIds,
         title: title.trim(),
         description: description.trim(),
-        dueDate: dueDate || undefined,
-        attachmentFile: taskFile || undefined,
+        dueDate,
+        file: taskFile || undefined,
       });
 
       setTitle('');
@@ -92,9 +160,10 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
       setTaskFile(null);
       setIsCreatingTask(false);
 
-      if (onNotify) onNotify('Task assigned to student successfully.');
-      loadData();
+      if (onNotify) onNotify(res.message || 'Task assigned successfully.');
+      await loadData();
     } catch (err: any) {
+      console.error('[createGuideTask] error:', err);
       setTaskError(err.message || 'Failed to create task.');
     } finally {
       setSavingTask(false);
@@ -119,7 +188,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
     if (!reviewTask) return;
 
     if (reviewAction === 'send_back' && !reviewNote.trim()) {
-      setReviewError('A reason note is required when sending back a task.');
+      setReviewError('A note explaining why the task is sent back is required.');
       return;
     }
 
@@ -127,19 +196,17 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
     setReviewError(null);
 
     try {
-      if (reviewAction === 'complete') {
-        // Calls review_task RPC
-        await api.completeGuideTask(reviewTask.id, reviewNote.trim() || null);
-        if (onNotify) onNotify(`Task "${reviewTask.title}" marked completed.`);
-      } else {
-        // Calls review_task RPC
-        await api.sendBackGuideTask(reviewTask.id, reviewNote.trim());
-        if (onNotify) onNotify(`Task "${reviewTask.title}" sent back to student with note.`);
-      }
+      const res = await api.reviewTask(
+        reviewTask.id,
+        reviewAction,
+        reviewNote.trim()
+      );
+      if (onNotify) onNotify(res.message);
 
       closeReviewModal();
-      loadData();
+      await loadData();
     } catch (err: any) {
+      console.error('[reviewTask] error:', err);
       setReviewError(err.message || 'Failed to update task review.');
     } finally {
       setIsSubmittingReview(false);
@@ -153,26 +220,22 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
     }));
   };
 
-  const getStudentName = (id: string) => {
-    const s = mentees.find((m) => m.id === id);
-    return s ? s.fullName : 'Student';
-  };
-
   const formatCleanDate = (dateStr: string) => {
     if (!dateStr) return '';
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) return dateStr;
-    return d.toLocaleDateString(undefined, {
-      month: 'short',
+    return d.toLocaleDateString('en-GB', {
       day: 'numeric',
+      month: 'short',
       year: 'numeric',
+      timeZone: 'Asia/Kolkata',
     });
   };
 
-  // Group tasks into three workflow lists
-  // Status 'awaiting_review' is the submitted state
-  const awaitingReviewTasks = tasks.filter((t) => t.status === 'awaiting_review');
-  const assignedTasks = tasks.filter((t) => t.status === 'assigned' || (t.status as any) === 'pending');
+  // Group tasks into lists:
+  // Awaiting review (submitted tasks)
+  const awaitingReviewTasks = tasks.filter((t) => t.status === 'submitted');
+  const assignedTasks = tasks.filter((t) => t.status === 'assigned');
   const completedTasks = tasks.filter((t) => t.status === 'completed');
 
   return (
@@ -184,16 +247,18 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
             Tasks
           </h2>
           <p className="text-[13px] text-[#6B7280] mt-0.5">
-            Assign preparation tasks and review submitted student work
+            Assign preparation tasks per program and review submitted student work
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={() => {
-              if (mentees.length > 0 && !selectedStudentId) {
-                setSelectedStudentId(mentees[0].id);
+              if (programs.length > 0 && !selectedProgramId) {
+                setSelectedProgramId(programs[0].programId);
+                setSelectedStudentIds(programs[0].students.map((s) => s.id));
               }
+              setTaskError(null);
               setIsCreatingTask(true);
             }}
             className="px-4 py-2 rounded-[10px] bg-[#D4202C] text-white text-xs font-semibold hover:bg-[#B81B26] active:bg-[#B81B26] flex items-center gap-1.5 transition-colors cursor-pointer"
@@ -206,7 +271,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
 
       {/* Loading state */}
       {loading ? (
-        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-xs text-[#6B7280]">
           Loading tasks...
         </div>
       ) : (
@@ -249,7 +314,11 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6B7280] mt-1">
                           <span>
-                            Student: <strong className="text-[#111111]">{getStudentName(task.studentId)}</strong>
+                            Program: <strong className="text-[#111111]">{task.programName || 'Program'}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Student: <strong className="text-[#111111]">{task.studentName || 'Student'}</strong>
                           </span>
                           <span>•</span>
                           <span>Due date: {formatCleanDate(task.dueDate)}</span>
@@ -257,7 +326,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                             <>
                               <span>•</span>
                               <span className="text-[#111111] font-medium">
-                                Submitted {new Date(task.submittedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })} at {new Date(task.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                Submitted {formatCleanDate(task.submittedAt)}
                               </span>
                             </>
                           )}
@@ -314,18 +383,19 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                         <p className="text-[#6B7280] italic">No submission note provided.</p>
                       )}
 
-                      {task.submissionFileId && (
-                        <div className="pt-1">
-                          <a
-                            href={task.submissionFileId.startsWith('http') ? task.submissionFileId : `/api/files/download/${task.submissionFileId}`}
-                            download
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111] hover:bg-gray-200 transition-colors"
-                          >
-                            <Download className="w-3.5 h-3.5 text-[#D4202C]" />
-                            <span>
-                              Download submitted file ({task.submissionFileName || 'File'})
-                            </span>
-                          </a>
+                      {task.files && task.files.length > 0 && (
+                        <div className="pt-1 flex flex-wrap gap-2">
+                          {task.files
+                            .filter((f) => f.kind === 'submission')
+                            .map((f) => (
+                              <div
+                                key={f.id}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#F3F4F6] text-xs font-medium text-[#111111]"
+                              >
+                                <FileText className="w-3.5 h-3.5 text-[#6B7280]" />
+                                <span>{f.fileName}</span>
+                              </div>
+                            ))}
                         </div>
                       )}
                     </div>
@@ -335,7 +405,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
             )}
           </div>
 
-          {/* SECTION 2: Assigned tasks (NO COMPLETE BUTTON) */}
+          {/* SECTION 2: Active / Assigned tasks */}
           <div className="space-y-3 pt-2">
             <div className="flex items-center justify-between">
               <h3 className="font-bold text-base text-[#111111]">
@@ -345,7 +415,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
 
             {assignedTasks.length === 0 ? (
               <div className="p-4 rounded-2xl bg-[#F3F4F6] text-center text-xs text-[#6B7280]">
-                No pending assigned tasks.
+                No assigned tasks currently pending student submission.
               </div>
             ) : (
               <div className="space-y-3">
@@ -359,14 +429,18 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                         <h4 className="font-bold text-base text-[#111111]">{task.title}</h4>
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6B7280] mt-1">
                           <span>
-                            Student: <strong className="text-[#111111]">{getStudentName(task.studentId)}</strong>
+                            Program: <strong className="text-[#111111]">{task.programName || 'Program'}</strong>
+                          </span>
+                          <span>•</span>
+                          <span>
+                            Student: <strong className="text-[#111111]">{task.studentName || 'Student'}</strong>
                           </span>
                           <span>•</span>
                           <span>Due date: {formatCleanDate(task.dueDate)}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0 self-start">
+                      <div className="shrink-0">
                         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-white text-[#6B7280] text-xs font-semibold border border-gray-200">
                           Assigned
                         </span>
@@ -379,25 +453,28 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                       </p>
                     )}
 
-                    {task.reviewerNote && (
+                    {task.reviewNote && (
                       <div className="p-2.5 rounded-xl bg-white border border-gray-200 text-xs text-[#111111]">
                         <span className="font-semibold text-[#111111] block text-xs">
                           Note sent with returned task:
                         </span>
-                        <p className="mt-0.5">{task.reviewerNote}</p>
+                        <p className="mt-0.5">{task.reviewNote}</p>
                       </div>
                     )}
 
-                    {task.attachmentFileId && (
-                      <div className="pt-0.5">
-                        <a
-                          href={task.attachmentFileId.startsWith('http') ? task.attachmentFileId : `/api/files/download/${task.attachmentFileId}`}
-                          download
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-xs font-medium text-[#111111] hover:bg-gray-100 transition-colors shadow-2xs"
-                        >
-                          <Download className="w-3.5 h-3.5 text-[#6B7280]" />
-                          <span>Guide attachment ({task.attachmentFileName || 'Download'})</span>
-                        </a>
+                    {task.files && task.files.length > 0 && (
+                      <div className="pt-0.5 flex flex-wrap gap-2">
+                        {task.files
+                          .filter((f) => f.kind === 'guide_attachment')
+                          .map((f) => (
+                            <div
+                              key={f.id}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white text-xs font-medium text-[#111111] shadow-2xs"
+                            >
+                              <Download className="w-3.5 h-3.5 text-[#6B7280]" />
+                              <span>Guide attachment ({f.fileName})</span>
+                            </div>
+                          ))}
                       </div>
                     )}
                   </div>
@@ -422,7 +499,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
               <div className="space-y-3">
                 {completedTasks.map((task) => {
                   const isSubmissionOpen = !!expandedSubmissions[task.id];
-                  const hasDetails = !!(task.submissionNote || task.submissionFileId || task.reviewerNote);
+                  const hasDetails = !!(task.submissionNote || (task.files && task.files.length > 0) || task.reviewNote);
 
                   return (
                     <div
@@ -434,7 +511,11 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                           <h4 className="font-bold text-base text-[#111111]">{task.title}</h4>
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6B7280] mt-1">
                             <span>
-                              Student: <strong className="text-[#111111]">{getStudentName(task.studentId)}</strong>
+                              Program: <strong className="text-[#111111]">{task.programName || 'Program'}</strong>
+                            </span>
+                            <span>•</span>
+                            <span>
+                              Student: <strong className="text-[#111111]">{task.studentName || 'Student'}</strong>
                             </span>
                             <span>•</span>
                             <span>Due date: {formatCleanDate(task.dueDate)}</span>
@@ -449,10 +530,21 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                           </div>
                         </div>
 
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-[#111111] border border-gray-200 text-xs font-semibold self-start">
-                          <Check className="w-3.5 h-3.5 text-[#D4202C] stroke-[3]" />
-                          <span>Completed</span>
-                        </span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white text-[#111111] text-xs font-semibold border border-gray-200">
+                            <Check className="w-3 h-3 text-[#D4202C]" />
+                            Completed
+                          </span>
+                          {hasDetails && (
+                            <button
+                              type="button"
+                              onClick={() => toggleSubmission(task.id)}
+                              className="px-2.5 py-1 rounded-lg bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 transition-colors"
+                            >
+                              {isSubmissionOpen ? 'Hide work' : 'View work'}
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       {task.description && (
@@ -461,47 +553,24 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                         </p>
                       )}
 
-                      {/* Expandable Submission & Review Details */}
-                      {hasDetails && (
-                        <div className="pt-1">
-                          <button
-                            type="button"
-                            onClick={() => toggleSubmission(task.id)}
-                            className="text-xs font-semibold text-[#111111] hover:underline flex items-center gap-1"
-                          >
-                            <span>{isSubmissionOpen ? 'Hide submission details' : 'View submission details'}</span>
-                          </button>
+                      {/* Dropdown with Student Submission & Review note */}
+                      {isSubmissionOpen && hasDetails && (
+                        <div className="p-3.5 rounded-xl bg-white space-y-2 text-xs border border-gray-200 mt-2">
+                          {task.submissionNote && (
+                            <div className="p-2.5 rounded-lg bg-[#F3F4F6] text-[#111111]">
+                              <span className="text-[#6B7280] font-medium block text-xs mb-0.5">
+                                Student submission note:
+                              </span>
+                              <p className="leading-relaxed whitespace-pre-wrap">{task.submissionNote}</p>
+                            </div>
+                          )}
 
-                          {isSubmissionOpen && (
-                            <div className="mt-2 p-3 rounded-xl bg-white space-y-2 text-xs border border-gray-200">
-                              {task.submissionNote && (
-                                <div>
-                                  <span className="text-[#6B7280] font-medium block text-xs">
-                                    Student note:
-                                  </span>
-                                  <p className="text-[#111111] mt-0.5">{task.submissionNote}</p>
-                                </div>
-                              )}
-
-                              {task.submissionFileId && (
-                                <a
-                                  href={task.submissionFileId.startsWith('http') ? task.submissionFileId : `/api/files/download/${task.submissionFileId}`}
-                                  download
-                                  className="inline-flex items-center gap-1.5 text-xs text-[#D4202C] font-semibold hover:underline"
-                                >
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>Download student file ({task.submissionFileName || 'File'})</span>
-                                </a>
-                              )}
-
-                              {task.reviewerNote && (
-                                <div className="pt-1 border-t border-gray-100">
-                                  <span className="text-[#6B7280] font-medium block text-xs">
-                                    Guide review note:
-                                  </span>
-                                  <p className="text-[#111111] mt-0.5">{task.reviewerNote}</p>
-                                </div>
-                              )}
+                          {task.reviewNote && (
+                            <div className="p-2.5 rounded-lg bg-[#F3F4F6] text-[#111111]">
+                              <span className="text-[#6B7280] font-medium block text-xs mb-0.5">
+                                Mentor review note:
+                              </span>
+                              <p className="leading-relaxed whitespace-pre-wrap">{task.reviewNote}</p>
                             </div>
                           )}
                         </div>
@@ -515,17 +584,17 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
         </div>
       )}
 
-      {/* ================= REVIEW ACTION MODAL (Complete or Send Back) ================= */}
+      {/* ================= REVIEW MODAL (Send back or Complete) ================= */}
       {reviewTask && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col shadow-xl overflow-hidden">
+          <div className="bg-white rounded-2xl w-full max-w-md border border-[#E5E7EB] overflow-hidden shadow-xl">
             <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-base text-[#111111]">
-                  {reviewAction === 'complete' ? 'Mark task completed' : 'Send back task'}
+                  {reviewAction === 'complete' ? 'Mark task completed' : 'Send task back'}
                 </h3>
-                <p className="text-xs text-[#6B7280] truncate max-w-xs">
-                  {reviewTask.title} • {getStudentName(reviewTask.studentId)}
+                <p className="text-xs text-[#6B7280] mt-0.5">
+                  {reviewTask.studentName} • {reviewTask.programName || 'Program'}
                 </p>
               </div>
               <button
@@ -536,32 +605,16 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
               </button>
             </div>
 
-            <form onSubmit={handleSubmitReview} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
-              {reviewAction === 'complete' ? (
-                <div className="p-3 rounded-xl bg-[#F3F4F6] text-xs text-[#111111] space-y-1">
-                  <div className="font-semibold flex items-center gap-1.5">
-                    <Check className="w-4 h-4 text-[#D4202C] stroke-[3]" />
-                    <span>Complete verification</span>
-                  </div>
-                  <p className="text-[#6B7280]">
-                    Review the work before completing. The student will be notified that this task is marked completed.
-                  </p>
-                </div>
-              ) : (
-                <div className="p-3 rounded-xl bg-[#F3F4F6] text-xs text-[#111111] space-y-1">
-                  <div className="font-semibold flex items-center gap-1.5">
-                    <AlertCircle className="w-4 h-4 text-[#D4202C]" />
-                    <span>Return for revision</span>
-                  </div>
-                  <p className="text-[#6B7280]">
-                    Returning will switch the status back to Assigned with your required revision note.
-                  </p>
-                </div>
-              )}
-
+            <form onSubmit={handleSubmitReview} className="p-4 sm:p-5 space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  {reviewAction === 'send_back' ? 'Reason / revision note (required)' : 'Review note (optional)'}
+                  {reviewAction === 'send_back' ? (
+                    <span>
+                      Reason note <span className="text-[#D4202C]">*</span>
+                    </span>
+                  ) : (
+                    'Review note (optional)'
+                  )}
                 </label>
                 <textarea
                   value={reviewNote}
@@ -569,7 +622,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                   placeholder={
                     reviewAction === 'send_back'
                       ? 'Explain what needs correction or re-submission...'
-                      : 'Add praise or closing remarks...'
+                      : 'Add feedback or closing remarks...'
                   }
                   rows={3}
                   required={reviewAction === 'send_back'}
@@ -611,9 +664,14 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md max-h-[90vh] flex flex-col border border-[#E5E7EB] overflow-hidden">
             <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
-              <h3 className="font-bold text-base text-[#111111]">
-                Assign new task
-              </h3>
+              <div>
+                <h3 className="font-bold text-base text-[#111111]">
+                  Assign new task
+                </h3>
+                <p className="text-xs text-[#6B7280]">
+                  Select program and students to assign
+                </p>
+              </div>
               <button
                 onClick={() => setIsCreatingTask(false)}
                 className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111] hover:bg-gray-200"
@@ -623,27 +681,82 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
             </div>
 
             <form onSubmit={handleCreateTask} className="p-4 sm:p-5 space-y-4 overflow-y-auto">
+              {/* Choose Program */}
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Assign student
+                  Program <span className="text-[#D4202C]">*</span>
                 </label>
                 <select
-                  value={selectedStudentId}
-                  onChange={(e) => setSelectedStudentId(e.target.value)}
+                  value={selectedProgramId}
+                  onChange={(e) => handleProgramChange(e.target.value)}
                   required
                   className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-xs text-[#111111] border border-transparent focus:border-[#D4202C] focus:outline-none"
                 >
-                  {mentees.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.fullName}
+                  {programs.map((p) => (
+                    <option key={p.programId} value={p.programId}>
+                      {p.programName} ({p.students.length} students)
                     </option>
                   ))}
                 </select>
               </div>
 
+              {/* Choose Students */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-[#111111]">
+                    Students ({selectedStudentIds.length} of {currentProgramStudents.length} selected) <span className="text-[#D4202C]">*</span>
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={selectAllStudentsInProgram}
+                      className="text-xs text-[#D4202C] hover:underline font-medium"
+                    >
+                      All
+                    </button>
+                    <span className="text-xs text-[#9CA3AF]">|</span>
+                    <button
+                      type="button"
+                      onClick={deselectAllStudentsInProgram}
+                      className="text-xs text-[#6B7280] hover:underline font-medium"
+                    >
+                      None
+                    </button>
+                  </div>
+                </div>
+
+                {currentProgramStudents.length === 0 ? (
+                  <p className="text-xs text-[#6B7280] italic p-3 bg-[#F3F4F6] rounded-xl">
+                    No students currently enrolled in this program.
+                  </p>
+                ) : (
+                  <div className="max-h-36 overflow-y-auto p-2 bg-[#F3F4F6] rounded-xl space-y-1">
+                    {currentProgramStudents.map((st) => {
+                      const isChecked = selectedStudentIds.includes(st.id);
+                      return (
+                        <label
+                          key={st.id}
+                          className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-white text-xs text-[#111111] cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleStudentSelection(st.id)}
+                            className="accent-[#D4202C] rounded w-4 h-4"
+                          />
+                          <span className="font-medium">{st.fullName}</span>
+                          <span className="text-[11px] text-[#6B7280]">({st.username})</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Title */}
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Task title
+                  Task title <span className="text-[#D4202C]">*</span>
                 </label>
                 <input
                   type="text"
@@ -655,6 +768,7 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                 />
               </div>
 
+              {/* Description */}
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
                   Description / instructions (optional)
@@ -668,18 +782,21 @@ export const GuideTasks: React.FC<GuideTasksProps> = ({ onNotify }) => {
                 />
               </div>
 
+              {/* Due Date */}
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  Due date (optional)
+                  Due date <span className="text-[#D4202C]">*</span>
                 </label>
                 <input
                   type="date"
                   value={dueDate}
                   onChange={(e) => setDueDate(e.target.value)}
+                  required
                   className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-xs text-[#111111] border border-transparent focus:border-[#D4202C] focus:outline-none"
                 />
               </div>
 
+              {/* Optional attachment */}
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
                   Attach reference file (optional)

@@ -95,7 +95,7 @@ export const LeaderboardView: React.FC<LeaderboardViewProps> = ({ currentStudent
                         </span>
                       )}
                     </div>
-                    {entry.programs.length > 0 && (
+                    {entry.programs && entry.programs.length > 0 && (
                       <div className="text-xs sm:text-[13px] text-[#6B7280] truncate mt-0.5">
                         {entry.programs.join(', ')}
                       </div>

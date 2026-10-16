@@ -90,8 +90,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
         password: password,
         fullName: trimmedFullName,
         role,
-        notificationEmail: notificationEmail.trim() || undefined,
-        assignedGuideId: role === 'student' && assignedGuideId ? assignedGuideId : undefined,
+        email: notificationEmail.trim() || undefined,
       });
 
       // 3. Reset form, close modal, and refresh user list

@@ -33,10 +33,20 @@ export interface StudentProgramRecord {
   programId: string;
 }
 
+export interface StudentProgramGuideRecord {
+  id: string;
+  studentId: string;
+  programId: string;
+  guideId: string;
+  createdAt: string;
+  assignedBy?: string;
+}
+
 export interface DatabaseSchema {
   users: (User & { passwordHash: string })[];
   programs: Program[];
   studentPrograms: StudentProgramRecord[];
+  studentProgramGuides: StudentProgramGuideRecord[];
   attendance: AttendanceRecord[];
   tasks: TaskRecord[];
   remarks: RemarkRecord[];
@@ -95,6 +105,9 @@ class Database {
           }
         });
       }
+      if (!schema.studentProgramGuides) {
+        schema.studentProgramGuides = [];
+      }
       return schema;
     } catch (e) {
       console.error('Failed to parse db.json, initializing empty db', e);
@@ -104,6 +117,7 @@ class Database {
     users: [],
     programs: [],
     studentPrograms: [],
+    studentProgramGuides: [],
     attendance: [],
     tasks: [],
     remarks: [],
@@ -900,7 +914,7 @@ class Database {
 
     for (const rec of this.data.screenshots) {
       if (rec.status === 'submitted' && rec.fileId) {
-        const submittedMs = new Date(rec.submittedAt).getTime();
+        const submittedMs = new Date(rec.submittedAt || rec.uploadedAt || rec.date).getTime();
         if (nowMs - submittedMs > cutoffMs) {
           // Delete file from disk
           const fileRecord = this.data.uploadedFiles.find((f) => f.id === rec.fileId);
@@ -933,6 +947,144 @@ class Database {
 
   public getUploadedFile(id: string): UploadedFileRecord | undefined {
     return this.data.uploadedFiles.find((f) => f.id === id);
+  }
+
+  // --- Student Program Guides ---
+  public getStudentProgramGuides(filter?: {
+    studentId?: string;
+    programId?: string;
+    guideId?: string;
+  }): StudentProgramGuideRecord[] {
+    if (!this.data.studentProgramGuides) {
+      this.data.studentProgramGuides = [];
+    }
+    return this.data.studentProgramGuides.filter((spg) => {
+      if (filter?.studentId && spg.studentId !== filter.studentId) return false;
+      if (filter?.programId && spg.programId !== filter.programId) return false;
+      if (filter?.guideId && spg.guideId !== filter.guideId) return false;
+      return true;
+    });
+  }
+
+  public assignStudentProgramGuides(
+    assignments: Array<{
+      studentId: string;
+      programId: string;
+      guideId: string;
+      assignedBy?: string;
+    }>,
+    mode: 'add' | 'replace' = 'add',
+    actor?: { id: string; name: string }
+  ): { added: number; replaced: number; total: number } {
+    if (!this.data.studentProgramGuides) {
+      this.data.studentProgramGuides = [];
+    }
+
+    let added = 0;
+    let replaced = 0;
+
+    if (mode === 'replace') {
+      const targetPairs = new Set(assignments.map((a) => `${a.studentId}:::${a.programId}`));
+      const initialCount = this.data.studentProgramGuides.length;
+      this.data.studentProgramGuides = this.data.studentProgramGuides.filter(
+        (spg) => !targetPairs.has(`${spg.studentId}:::${spg.programId}`)
+      );
+      replaced = initialCount - this.data.studentProgramGuides.length;
+    }
+
+    for (const a of assignments) {
+      const exists = this.data.studentProgramGuides.some(
+        (spg) =>
+          spg.studentId === a.studentId &&
+          spg.programId === a.programId &&
+          spg.guideId === a.guideId
+      );
+
+      if (!exists) {
+        this.data.studentProgramGuides.push({
+          id: uuidv4(),
+          studentId: a.studentId,
+          programId: a.programId,
+          guideId: a.guideId,
+          createdAt: new Date().toISOString(),
+          assignedBy: a.assignedBy || actor?.id,
+        });
+        added++;
+      }
+    }
+
+    this.save();
+
+    if (actor && (added > 0 || replaced > 0)) {
+      this.addAuditLogEntry({
+        id: uuidv4(),
+        actorId: actor.id,
+        actorName: actor.name,
+        studentId: assignments[0]?.studentId || '',
+        studentName: assignments.length === 1 ? 'Single Student' : `${assignments.length} Students`,
+        date: getKolkataDateString(),
+        action: mode === 'replace' ? 'replace_program_guides' : 'assign_program_guides',
+        oldValue: `${replaced} previous assignments`,
+        newValue: `${added} added, mode: ${mode}`,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return {
+      added,
+      replaced,
+      total: this.data.studentProgramGuides.length,
+    };
+  }
+
+  public removeStudentProgramGuide(
+    studentId: string,
+    programId: string,
+    guideId: string,
+    actor?: { id: string; name: string }
+  ): boolean {
+    if (!this.data.studentProgramGuides) {
+      this.data.studentProgramGuides = [];
+      return false;
+    }
+
+    const idx = this.data.studentProgramGuides.findIndex(
+      (spg) =>
+        spg.studentId === studentId &&
+        spg.programId === programId &&
+        spg.guideId === guideId
+    );
+
+    if (idx === -1) return false;
+
+    this.data.studentProgramGuides.splice(idx, 1);
+    this.save();
+
+    if (actor) {
+      const student = this.findUserById(studentId);
+      this.addAuditLogEntry({
+        id: uuidv4(),
+        actorId: actor.id,
+        actorName: actor.name,
+        studentId,
+        studentName: student?.fullName || 'Student',
+        date: getKolkataDateString(),
+        action: 'remove_program_guide',
+        oldValue: `Guide: ${guideId}, Program: ${programId}`,
+        newValue: 'Removed',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return true;
+  }
+
+  public addAuditLogEntry(entry: AuditLogEntry) {
+    if (!this.data.auditLogs) {
+      this.data.auditLogs = [];
+    }
+    this.data.auditLogs.unshift(entry);
+    this.save();
   }
 
   // --- Audit Log ---

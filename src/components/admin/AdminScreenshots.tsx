@@ -206,7 +206,7 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                   </div>
 
                   <div className="text-xs text-[#6B7280] mt-2">
-                    Submitted: {new Date(item.submittedAt).toLocaleTimeString()}
+                    Submitted: {new Date(item.submittedAt || item.uploadedAt || item.date).toLocaleTimeString()}
                   </div>
                 </div>
 
@@ -252,7 +252,7 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                 </div>
                 <p className="text-xs text-[#6B7280] mt-0.5">
                   Screen Time Verification • {selectedItem.date} at{' '}
-                  {new Date(selectedItem.submittedAt).toLocaleTimeString([], {
+                  {new Date(selectedItem.submittedAt || selectedItem.uploadedAt || selectedItem.date).toLocaleTimeString([], {
                     hour: '2-digit',
                     minute: '2-digit',
                   })}

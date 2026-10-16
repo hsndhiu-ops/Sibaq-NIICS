@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { AttendanceRecord, RemarkRecord, Program } from '../../types';
+import { AttendanceRecord, RemarkRecord, Program, StudentProgramGuidesGroup, StudentAssignedGuide } from '../../types';
 import { api } from '../../api';
-import { Check, Clock } from 'lucide-react';
+import { Check, Clock, Users, Mail } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface StudentProgressProps {
   attendanceHistory: AttendanceRecord[];
   remarks: RemarkRecord[];
   programs: Program[];
+  programGuides?: StudentProgramGuidesGroup[];
+  allGuides?: StudentAssignedGuide[];
   hasUploadedScreenshotToday: boolean;
   onRefresh: () => void;
 }
@@ -16,6 +18,8 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
   attendanceHistory,
   remarks,
   programs,
+  programGuides = [],
+  allGuides = [],
   hasUploadedScreenshotToday,
   onRefresh,
 }) => {
@@ -201,20 +205,64 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {programs.map((p) => (
-              <div
-                key={p.id}
-                className="p-3.5 sm:p-4 rounded-2xl bg-[#F3F4F6] flex items-center justify-between gap-2"
-              >
-                <div className="min-w-0">
-                  <div className="font-bold text-sm text-[#111111] truncate">{p.name}</div>
-                  <div className="text-[13px] text-[#6B7280] mt-0.5 truncate">{p.category || 'Stage'}</div>
+            {programs.map((p) => {
+              // Safely look up guides for this program across all possible representations
+              const matchingNames: string[] = [];
+
+              if (Array.isArray(p.guides)) {
+                for (const g of p.guides as any[]) {
+                  const name = g?.fullName || g?.name || g?.username;
+                  if (name) matchingNames.push(name);
+                }
+              }
+
+              if (Array.isArray(programGuides)) {
+                for (const pg of programGuides as any[]) {
+                  if (!pg) continue;
+                  const pgId = pg.programId || pg.program_id || (pg.program && pg.program.id);
+                  if (pgId === p.id) {
+                    if (pg.guideName) matchingNames.push(pg.guideName);
+                    else if (pg.guide_name) matchingNames.push(pg.guide_name);
+                    else if (Array.isArray(pg.guides)) {
+                      for (const g of pg.guides) {
+                        const name = g?.fullName || g?.name || g?.username;
+                        if (name) matchingNames.push(name);
+                      }
+                    }
+                  }
+                }
+              }
+
+              const guideNames = Array.from(new Set(matchingNames)).filter(Boolean).join(', ');
+
+              return (
+                <div
+                  key={p.id}
+                  className="p-3.5 sm:p-4 rounded-2xl bg-[#F3F4F6] flex items-start justify-between gap-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="font-bold text-sm text-[#111111] truncate">{p.name}</div>
+                    <div className="text-[13px] text-[#6B7280] mt-0.5 truncate capitalize">
+                      {p.kind === 'solo'
+                        ? 'Solo'
+                        : `Group with ${Math.max(0, (p.memberCount || 1) - 1)} others`}
+                    </div>
+                    {guideNames.length > 0 ? (
+                      <div className="text-xs text-[#D4202C] font-semibold mt-1.5 truncate">
+                        Guide: {guideNames}
+                      </div>
+                    ) : (
+                      <div className="text-xs text-[#9CA3AF] mt-1.5">
+                        No guide assigned yet
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white text-[#111111] capitalize shrink-0">
+                    {p.kind}
+                  </span>
                 </div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded-lg bg-white text-[#111111] capitalize shrink-0">
-                  {p.type}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -197,11 +197,64 @@ router.get('/students/:id', (req, res) => {
   const streak = db.calculateStreak(student.id, today);
   const totalPoints = db.calculateTotalPoints(student.id);
 
+  // Program guides & all unique guides
+  const studentProgGuides = db.getStudentProgramGuides({ studentId: student.id });
+  const allUsers = db.getUsers();
+  const userMap = new Map(allUsers.map((u) => [u.id, u]));
+  const progMap = new Map(programs.map((p) => [p.id, p]));
+
+  const guideMap = new Map<string, { id: string; fullName: string; username: string; email?: string; programs: string[] }>();
+  if (guide) {
+    guideMap.set(guide.id, {
+      id: guide.id,
+      fullName: guide.fullName,
+      username: guide.username,
+      email: guide.email || undefined,
+      programs: ['General'],
+    });
+  }
+  studentProgGuides.forEach((g) => {
+    const u = userMap.get(g.guideId);
+    if (!u) return;
+    const prog = progMap.get(g.programId);
+    const progName = prog ? prog.name : (g.programId === 'general' ? 'General' : g.programId);
+    if (guideMap.has(u.id)) {
+      const existing = guideMap.get(u.id)!;
+      if (!existing.programs.includes(progName)) existing.programs.push(progName);
+    } else {
+      guideMap.set(u.id, {
+        id: u.id,
+        fullName: u.fullName,
+        username: u.username,
+        email: u.email || undefined,
+        programs: [progName],
+      });
+    }
+  });
+
+  const allGuides = Array.from(guideMap.values());
+  const programGuides = studentProgGuides.map((g) => {
+    const u = userMap.get(g.guideId);
+    const prog = progMap.get(g.programId);
+    return {
+      id: g.id,
+      programId: g.programId,
+      programName: prog ? prog.name : (g.programId === 'general' ? 'General' : g.programId),
+      guideId: g.guideId,
+      guideName: u ? u.fullName : 'Unknown Guide',
+      guideUsername: u ? u.username : '',
+      guideEmail: u?.email || undefined,
+      assignedAt: g.createdAt,
+    };
+  });
+
   const { passwordHash: _, ...safeStudent } = student;
 
   res.json({
     student: safeStudent,
     guide: guide ? { id: guide.id, fullName: guide.fullName, username: guide.username } : null,
+    allGuides,
+    programGuides,
     programs,
     streak,
     totalPoints,

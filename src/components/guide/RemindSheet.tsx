@@ -1,17 +1,22 @@
 import React, { useState } from 'react';
-import { X, Send, Clock, AlertCircle } from 'lucide-react';
+import { X, Send, AlertCircle } from 'lucide-react';
 
 interface RemindSheetProps {
   isOpen: boolean;
   studentName: string;
   studentId: string;
+  programId: string;
+  programName?: string;
   onClose: () => void;
-  onSend: (message: string) => Promise<void>;
+  onSend: (message: string, programId: string) => Promise<void>;
 }
 
 export const RemindSheet: React.FC<RemindSheetProps> = ({
   isOpen,
   studentName,
+  studentId,
+  programId,
+  programName,
   onClose,
   onSend,
 }) => {
@@ -51,12 +56,13 @@ export const RemindSheet: React.FC<RemindSheetProps> = ({
     }
 
     try {
-      await onSend(messageToSend);
+      await onSend(messageToSend, programId);
       setCustomText('');
       setSelectedQuick('meet');
       onClose();
     } catch (err: any) {
-      setError(err?.message || 'Failed to send reminder.');
+      console.error('[RemindSheet] error:', err);
+      setError(err?.message || "Couldn't send reminder. Try again.");
     } finally {
       setIsSending(false);
     }
@@ -73,7 +79,7 @@ export const RemindSheet: React.FC<RemindSheetProps> = ({
               Remind {studentName}
             </h3>
             <p className="text-[13px] text-[#6B7280]">
-              Send an instant notification to this student
+              {programName ? `Section: ${programName}` : 'Send an instant reminder'}
             </p>
           </div>
           <button
@@ -85,7 +91,6 @@ export const RemindSheet: React.FC<RemindSheetProps> = ({
           </button>
         </div>
 
-        {/* Errors: dark text with small icon, never a red background */}
         {error && (
           <div className="flex items-center gap-2 text-[#111111] text-xs font-medium py-1">
             <AlertCircle className="w-4 h-4 shrink-0 text-[#D4202C]" />
@@ -101,24 +106,24 @@ export const RemindSheet: React.FC<RemindSheetProps> = ({
             <button
               type="button"
               onClick={() => setSelectedQuick(selectedQuick === 'meet' ? null : 'meet')}
-              className={`py-2.5 px-3 rounded-xl text-xs font-semibold text-center transition-all ${
+              className={`p-3 rounded-xl text-xs font-semibold border text-center transition-colors ${
                 selectedQuick === 'meet'
-                  ? 'bg-[#D4202C] text-white'
-                  : 'bg-[#F3F4F6] text-[#111111] hover:bg-gray-200'
+                  ? 'border-[#D4202C] bg-red-50 text-[#D4202C]'
+                  : 'border-[#E5E7EB] bg-white text-[#111111] hover:bg-gray-50'
               }`}
             >
-              {quickChoice1}
+              Come and meet me
             </button>
             <button
               type="button"
               onClick={() => setSelectedQuick(selectedQuick === 'task' ? null : 'task')}
-              className={`py-2.5 px-3 rounded-xl text-xs font-semibold text-center transition-all ${
+              className={`p-3 rounded-xl text-xs font-semibold border text-center transition-colors ${
                 selectedQuick === 'task'
-                  ? 'bg-[#D4202C] text-white'
-                  : 'bg-[#F3F4F6] text-[#111111] hover:bg-gray-200'
+                  ? 'border-[#D4202C] bg-red-50 text-[#D4202C]'
+                  : 'border-[#E5E7EB] bg-white text-[#111111] hover:bg-gray-50'
               }`}
             >
-              {quickChoice2}
+              Finish your task
             </button>
           </div>
         </div>
@@ -126,48 +131,39 @@ export const RemindSheet: React.FC<RemindSheetProps> = ({
         <div className="space-y-1">
           <div className="flex items-center justify-between">
             <label className="block text-xs font-semibold text-[#111111]">
-              Optional note
+              Optional note (max 500 characters)
             </label>
-            <span className="text-xs text-[#6B7280]">
+            <span className="text-[11px] text-[#6B7280]">
               {customText.length}/500
             </span>
           </div>
           <textarea
-            value={customText}
-            maxLength={500}
-            onChange={(e) => setCustomText(e.target.value)}
             rows={3}
-            placeholder="Add an optional message (max 500 characters)..."
-            className="w-full px-3 py-2.5 rounded-xl bg-[#F3F4F6] text-xs text-[#111111] border border-transparent focus:border-[#D4202C] focus:outline-none placeholder-[#9CA3AF] resize-none"
+            maxLength={500}
+            value={customText}
+            onChange={(e) => setCustomText(e.target.value)}
+            placeholder="Add any specific instruction..."
+            className="w-full p-3 rounded-xl bg-[#F3F4F6] text-xs font-medium text-[#111111] placeholder:text-[#6B7280] border-0 focus:ring-2 focus:ring-[#D4202C] resize-none"
           />
         </div>
 
-        <div className="pt-2 flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-2 pt-2">
           <button
             type="button"
             onClick={onClose}
             disabled={isSending}
-            className="h-[48px] px-4 rounded-[10px] bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-[#F3F4F6]"
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold text-[#6B7280] hover:bg-gray-100 transition-colors"
           >
             Cancel
           </button>
           <button
             type="button"
             onClick={handleSend}
-            disabled={isSending}
-            className="h-[48px] px-5 rounded-[10px] bg-[#D4202C] text-white text-xs font-semibold hover:bg-[#B81B26] active:bg-[#B81B26] disabled:opacity-50 transition-colors flex items-center gap-1.5"
+            disabled={isSending || (!selectedQuick && !customText.trim())}
+            className="h-10 px-5 rounded-xl bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer"
           >
-            {isSending ? (
-              <>
-                <Clock className="w-3.5 h-3.5 animate-spin" />
-                <span>Sending...</span>
-              </>
-            ) : (
-              <>
-                <Send className="w-3.5 h-3.5" />
-                <span>Send</span>
-              </>
-            )}
+            <Send className="w-3.5 h-3.5" />
+            <span>{isSending ? 'Sending...' : 'Send reminder'}</span>
           </button>
         </div>
       </div>

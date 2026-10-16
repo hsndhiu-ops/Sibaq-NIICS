@@ -10,6 +10,7 @@ import studentRouter from './server/routes/studentRouter';
 import leaderboardRouter from './server/routes/leaderboardRouter';
 import notificationRouter from './server/routes/notificationRouter';
 import fileRouter from './server/routes/fileRouter';
+import programGuidesRouter from './server/routes/programGuidesRouter';
 import createUserHandler from './api/create-user';
 import resetPasswordHandler from './api/reset-password';
 import updateUserHandler from './api/update-user';
@@ -46,6 +47,7 @@ async function startServer() {
   app.use('/api/leaderboard', leaderboardRouter);
   app.use('/api/notifications', notificationRouter);
   app.use('/api/files', fileRouter);
+  app.use('/api/program-guides', programGuidesRouter);
 
   // Vercel serverless function equivalent routes
   app.post('/api/create-user', createUserHandler);

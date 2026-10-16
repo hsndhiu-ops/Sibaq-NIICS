@@ -1,46 +1,37 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { GuideTodayData, LadderLevel, LADDER_POINTS, Program } from '../../types';
-import { api } from '../../api';
-import { Check, Bell, ChevronDown, ChevronUp, Search, X, AlertCircle } from 'lucide-react';
+import {
+  GuideTodayData,
+  GuideTodayProgramSection,
+  LadderLevel,
+  LADDER_POINTS,
+  AttendanceRecord,
+} from '../../types';
+import { api, formatKolkataDisplayDate } from '../../api';
+import { SCORE_LEVEL_MAP, ScoreLevelNumber } from '../../lib/schema';
+import { Check, Bell, ChevronDown, ChevronUp, Search, X, AlertCircle, MessageSquare } from 'lucide-react';
 import { RemindSheet } from './RemindSheet';
+import { GuideMessageSheet } from './GuideMessageSheet';
 import { Pentagon } from '../brand/Decorations';
 
 interface GuideTodayProps {
   onRemindSuccess: (msg: string) => void;
 }
 
-const LADDER_OPTIONS: { level: LadderLevel; marks: number; label: string }[] = [
-  { level: 'Poor', marks: 5, label: '5 Poor' },
-  { level: 'Average', marks: 6, label: '6 Average' },
-  { level: 'Good', marks: 7, label: '7 Good' },
-  { level: 'Very good', marks: 8, label: '8 Very good' },
-  { level: 'Excellent', marks: 9, label: '9 Excellent' },
-  { level: 'Outstanding', marks: 10, label: '10 Outstanding' },
+const LADDER_OPTIONS: { level: LadderLevel; score: ScoreLevelNumber; label: string }[] = [
+  { level: 'Poor', score: 5, label: '5 Poor' },
+  { level: 'Average', score: 6, label: '6 Average' },
+  { level: 'Good', score: 7, label: '7 Good' },
+  { level: 'Very good', score: 8, label: '8 Very good' },
+  { level: 'Excellent', score: 9, label: '9 Excellent' },
+  { level: 'Outstanding', score: 10, label: '10 Outstanding' },
 ];
 
-function formatDisplayDate(dateStr: string): string {
-  if (!dateStr) return '';
-  const parts = dateStr.split('-');
-  if (parts.length !== 3) return dateStr;
-  const year = parts[0];
-  const monthIdx = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${day} ${months[monthIdx] || parts[1]} ${year}`;
-}
-
-function formatProgramsOneLine(programs: Program[]): string {
-  if (!programs || programs.length === 0) return 'No program yet';
-  if (programs.length === 1) return programs[0].name;
-  return `${programs[0].name} +${programs.length - 1} more`;
-}
-
-interface StudentDraft {
+interface RowDraft {
   status: 'present' | 'absent';
-  level: LadderLevel | null;
+  scoreLevel: number | null | undefined;
   note: string;
   originalStatus: 'present' | 'absent';
-  originalLevel: LadderLevel | null;
+  originalScoreLevel: number | null | undefined;
   originalNote: string;
 }
 
@@ -50,1239 +41,773 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Collapsed sections by programId
+  const [collapsedPrograms, setCollapsedPrograms] = useState<Record<string, boolean>>({});
+
+  // Active expanded row: keyed by attendance row ID
+  const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
+  const [expandedMode, setExpandedMode] = useState<'score' | 'note_only'>('score');
+
+  // Draft state keyed by attendance ID
+  const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
+
+  // Saving / error state
+  const [savingRowId, setSavingRowId] = useState<string | null>(null);
+  const [savedRowId, setSavedRowId] = useState<string | null>(null);
+  const [rowErrors, setRowErrors] = useState<Record<string, string | null>>({});
+  const [unsavedWarningRowId, setUnsavedWarningRowId] = useState<string | null>(null);
+
   // Remind Sheet state & 60s cooldown map
-  const [remindSheetTarget, setRemindSheetTarget] = useState<{ id: string; name: string } | null>(null);
+  const [remindTarget, setRemindTarget] = useState<{
+    studentId: string;
+    studentName: string;
+    programId: string;
+    programName: string;
+  } | null>(null);
   const [cooldowns, setCooldowns] = useState<Record<string, number>>({});
   const [, setNow] = useState(Date.now());
 
-  // Active expanded card
-  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
-  const [expandedMode, setExpandedMode] = useState<'present_score' | 'absent_note' | null>(null);
-
-  // Per-student drafts
-  const [drafts, setDrafts] = useState<Record<string, StudentDraft>>({});
-
-  // Status flags
-  const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
-  const [saveSuccessStudentId, setSaveSuccessStudentId] = useState<string | null>(null);
-  const [saveErrors, setSaveErrors] = useState<Record<string, string | null>>({});
-  const [unsavedWarningStudentId, setUnsavedWarningStudentId] = useState<string | null>(null);
+  // Message Sheet state
+  const [messageTarget, setMessageTarget] = useState<{
+    programId: string;
+    programName: string;
+    students: Array<{ id: string; name: string }>;
+    initialRecipientIds?: string[];
+  } | null>(null);
 
   useEffect(() => {
     loadTodayData();
   }, []);
 
-  // Timer tick for 60-second cooldown badges
+  // Tick for 60s cooldown badges
   useEffect(() => {
-    const timer = setInterval(() => {
-      setNow(Date.now());
-    }, 1000);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
   const loadTodayData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await api.getGuideToday();
       setData(res);
 
-      // Initialize drafts for any student currently in State B (Needs score) so their card is ready
-      const initialDrafts: Record<string, StudentDraft> = {};
-      let firstNeedsScoreId: string | null = null;
-      res.mentees.forEach((m) => {
-        initialDrafts[m.student.id] = {
-          status: m.attendance.status,
-          level: m.attendance.level,
-          note: m.attendance.note || '',
-          originalStatus: m.attendance.status,
-          originalLevel: m.attendance.level,
-          originalNote: m.attendance.note || '',
-        };
-        if (m.attendance.status === 'present' && !m.attendance.level && !firstNeedsScoreId) {
-          firstNeedsScoreId = m.student.id;
-        }
+      // Initialize drafts for rows
+      const initDrafts: Record<string, RowDraft> = {};
+      res.programs.forEach((prog) => {
+        prog.students.forEach((s) => {
+          const att = s.attendance;
+          initDrafts[att.id] = {
+            status: att.status,
+            scoreLevel: att.scoreLevel,
+            note: att.note || '',
+            originalStatus: att.status,
+            originalScoreLevel: att.scoreLevel,
+            originalNote: att.note || '',
+          };
+        });
       });
-      setDrafts(initialDrafts);
-
-      // If there is a student needing score, default expand them
-      if (firstNeedsScoreId) {
-        setExpandedStudentId(firstNeedsScoreId);
-        setExpandedMode('present_score');
-      }
-    } catch {
-      setError("Couldn't load students. Try again.");
+      setDrafts(initDrafts);
+    } catch (err: any) {
+      console.error('[loadTodayData] error:', err);
+      setError(err?.message || "Couldn't load today's sessions.");
     } finally {
       setLoading(false);
     }
   };
 
-  const getCooldownRemaining = (studentId: string): number => {
-    const expireTime = cooldowns[studentId];
-    if (!expireTime) return 0;
-    const diff = Math.ceil((expireTime - Date.now()) / 1000);
-    return diff > 0 ? diff : 0;
-  };
-
-  const handleSendReminder = async (message: string) => {
-    if (!remindSheetTarget) return;
-    const targetId = remindSheetTarget.id;
-    const res = await api.remindStudent({
-      studentId: targetId,
-      message,
-    });
-    setCooldowns((prev) => ({
-      ...prev,
-      [targetId]: Date.now() + 60000,
-    }));
-    onRemindSuccess(res.message);
-  };
-
-  /**
-   * Checks if an expanded student has unsaved draft changes.
-   */
-  const checkHasUnsavedChanges = (studentId: string): boolean => {
-    const draft = drafts[studentId];
-    if (!draft) return false;
+  const isDraftDirty = (rowId: string): boolean => {
+    const d = drafts[rowId];
+    if (!d) return false;
     return (
-      draft.status !== draft.originalStatus ||
-      draft.level !== draft.originalLevel ||
-      draft.note.trim() !== draft.originalNote.trim()
+      d.status !== d.originalStatus ||
+      d.scoreLevel !== d.originalScoreLevel ||
+      d.note !== d.originalNote
     );
   };
 
-  /**
-   * Safely switches expanded student, enforcing Rule 7 (unsaved changes guard).
-   */
-  const requestSwitchExpanded = (
-    nextStudentId: string,
-    nextMode: 'present_score' | 'absent_note'
-  ): boolean => {
-    if (expandedStudentId && expandedStudentId !== nextStudentId) {
-      if (checkHasUnsavedChanges(expandedStudentId)) {
-        setUnsavedWarningStudentId(expandedStudentId);
-        return false;
+  const handleRowClick = (rowId: string, att: AttendanceRecord, mode: 'score' | 'note_only' = 'score') => {
+    if (expandedRowId === rowId) {
+      // Toggle close if not dirty
+      if (isDraftDirty(rowId)) {
+        setUnsavedWarningRowId(rowId);
+        return;
       }
+      setExpandedRowId(null);
+      setUnsavedWarningRowId(null);
+      return;
     }
 
-    setUnsavedWarningStudentId(null);
-    setExpandedStudentId(nextStudentId);
-    setExpandedMode(nextMode);
+    if (expandedRowId && isDraftDirty(expandedRowId)) {
+      setUnsavedWarningRowId(expandedRowId);
+      return;
+    }
 
-    // Initialize or refresh draft for target student
-    const mentee = data?.mentees.find((m) => m.student.id === nextStudentId);
-    if (mentee) {
-      const origStatus = mentee.attendance.status;
-      const origLevel = mentee.attendance.level;
-      const origNote = mentee.attendance.note || '';
+    setUnsavedWarningRowId(null);
+    setExpandedRowId(rowId);
+    setExpandedMode(mode);
+
+    // Reset draft to current server state
+    setDrafts((prev) => ({
+      ...prev,
+      [rowId]: {
+        status: att.status,
+        scoreLevel: att.scoreLevel,
+        note: att.note || '',
+        originalStatus: att.status,
+        originalScoreLevel: att.scoreLevel,
+        originalNote: att.note || '',
+      },
+    }));
+  };
+
+  const handleMarkPresentQuick = async (e: React.MouseEvent, rowId: string) => {
+    e.stopPropagation();
+    if (expandedRowId && isDraftDirty(expandedRowId)) {
+      setUnsavedWarningRowId(expandedRowId);
+      return;
+    }
+
+    const currentDraft = drafts[rowId];
+    const currentNote = currentDraft ? currentDraft.note : '';
+
+    // Mark as present in state B (Needs score)
+    setDrafts((prev) => ({
+      ...prev,
+      [rowId]: {
+        status: 'present',
+        scoreLevel: null,
+        note: currentNote,
+        originalStatus: 'present',
+        originalScoreLevel: null,
+        originalNote: currentNote,
+      },
+    }));
+
+    setExpandedRowId(rowId);
+    setExpandedMode('score');
+    setUnsavedWarningRowId(null);
+
+    // Save immediate transition to present (score_level null)
+    try {
+      await api.updateAttendanceRow(rowId, {
+        status: 'present',
+        score_level: null,
+        note: currentNote || null,
+      });
+      await loadTodayData();
+    } catch (err: any) {
+      console.error('[handleMarkPresentQuick] error:', err);
+    }
+  };
+
+  const handleTogglePresentAbsent = (rowId: string, targetStatus: 'present' | 'absent') => {
+    const draft = drafts[rowId];
+    if (!draft) return;
+
+    if (targetStatus === 'absent' && draft.scoreLevel !== null) {
+      const confirmAbsent = window.confirm(
+        "Mark absent? This clears today's score."
+      );
+      if (!confirmAbsent) return;
 
       setDrafts((prev) => ({
         ...prev,
-        [nextStudentId]: {
-          status: nextMode === 'present_score' ? 'present' : 'absent',
-          level: nextMode === 'present_score' ? origLevel : null,
-          note: origNote,
-          originalStatus: origStatus,
-          originalLevel: origLevel,
-          originalNote: origNote,
+        [rowId]: {
+          ...draft,
+          status: 'absent',
+          scoreLevel: null,
         },
       }));
-    }
-    return true;
-  };
-
-  /**
-   * User taps "Mark present" on State A compact row.
-   */
-  const handleMarkPresent = (studentId: string) => {
-    requestSwitchExpanded(studentId, 'present_score');
-  };
-
-  /**
-   * User taps row body of State A (Note-only expanded card).
-   */
-  const handleRowClickStateA = (studentId: string) => {
-    if (expandedStudentId === studentId && expandedMode === 'absent_note') {
-      if (checkHasUnsavedChanges(studentId)) {
-        setUnsavedWarningStudentId(studentId);
-        return;
-      }
-      setExpandedStudentId(null);
-      setExpandedMode(null);
-      setUnsavedWarningStudentId(null);
       return;
     }
-    requestSwitchExpanded(studentId, 'absent_note');
-  };
 
-  /**
-   * User taps row body of State C (Done row).
-   */
-  const handleRowClickStateC = (studentId: string) => {
-    if (expandedStudentId === studentId && expandedMode === 'present_score') {
-      if (checkHasUnsavedChanges(studentId)) {
-        setUnsavedWarningStudentId(studentId);
-        return;
-      }
-      setExpandedStudentId(null);
-      setExpandedMode(null);
-      setUnsavedWarningStudentId(null);
-      return;
-    }
-    requestSwitchExpanded(studentId, 'present_score');
-  };
-
-  /**
-   * Update draft fields for active student.
-   */
-  const updateDraft = (studentId: string, updates: Partial<StudentDraft>) => {
     setDrafts((prev) => ({
       ...prev,
-      [studentId]: {
-        ...prev[studentId],
-        ...updates,
+      [rowId]: {
+        ...draft,
+        status: targetStatus,
+        scoreLevel: targetStatus === 'absent' ? null : draft.scoreLevel,
       },
     }));
-    setSaveErrors((prev) => ({ ...prev, [studentId]: null }));
-    setUnsavedWarningStudentId(null);
   };
 
-  /**
-   * Toggle to Absent from expanded card.
-   * Prompts confirmation only if a level exists.
-   */
-  const handleToggleToAbsent = async (studentId: string) => {
-    if (!data) return;
-    const draft = drafts[studentId];
-    const mentee = data.mentees.find((m) => m.student.id === studentId);
-    if (!draft || !mentee) return;
-
-    // Rule 6: ask "Mark absent? This clears today's score." only when a level exists.
-    const hasLevel = Boolean(draft.level || mentee.attendance.level);
-    if (hasLevel) {
-      const ok = window.confirm("Mark absent? This clears today's score.");
-      if (!ok) return;
-    }
-
-    setSavingStudentId(studentId);
-    setSaveErrors((prev) => ({ ...prev, [studentId]: null }));
-
-    try {
-      const noteToSave = draft.note.trim() || null;
-      await api.markGuideAttendance({
-        studentId,
-        date: data.date,
-        status: 'absent',
-        level: null,
-        note: noteToSave,
-      });
-
-      // Update locally
-      setData((prev) => {
-        if (!prev) return prev;
-        const updatedMentees = prev.mentees.map((m) => {
-          if (m.student.id !== studentId) return m;
-          return {
-            ...m,
-            attendance: {
-              ...m.attendance,
-              status: 'absent' as const,
-              level: null,
-              points: 0,
-              note: noteToSave,
-              isMarked: true,
-            },
-          };
-        });
-        const presentCount = updatedMentees.filter((m) => m.attendance.status === 'present').length;
-        return {
-          ...prev,
-          presentCount,
-          mentees: updatedMentees,
-        };
-      });
-
-      setSaveSuccessStudentId(studentId);
-      setTimeout(() => {
-        setSaveSuccessStudentId(null);
-        setExpandedStudentId(null);
-        setExpandedMode(null);
-        setUnsavedWarningStudentId(null);
-      }, 500);
-
-      // Refetch whole screen in background
-      api.getGuideToday(data.date).then((refreshed) => {
-        setData(refreshed);
-      });
-    } catch {
-      setSaveErrors((prev) => ({ ...prev, [studentId]: "Couldn't save. Try again." }));
-    } finally {
-      setSavingStudentId(null);
-    }
-  };
-
-  /**
-   * Save Note only (from State A note-only card). Keeps student absent.
-   */
-  const handleSaveNoteOnly = async (studentId: string) => {
-    if (!data) return;
-    const draft = drafts[studentId];
+  const handleSaveRow = async (rowId: string) => {
+    const draft = drafts[rowId];
     if (!draft) return;
 
-    setSavingStudentId(studentId);
-    setSaveErrors((prev) => ({ ...prev, [studentId]: null }));
+    if (draft.status === 'present' && draft.scoreLevel === null && expandedMode === 'score') {
+      return; // Save button disabled until score chosen
+    }
+
+    setSavingRowId(rowId);
+    setRowErrors((prev) => ({ ...prev, [rowId]: null }));
 
     try {
-      const noteToSave = draft.note.trim() || null;
-      await api.markGuideAttendance({
-        studentId,
-        date: data.date,
-        status: 'absent',
-        level: null,
-        note: noteToSave,
+      await api.updateAttendanceRow(rowId, {
+        status: draft.status,
+        score_level: draft.status === 'absent' ? null : (draft.scoreLevel ?? null),
+        note: draft.note.trim() || null,
       });
 
-      // Update locally
-      setData((prev) => {
-        if (!prev) return prev;
-        const updatedMentees = prev.mentees.map((m) => {
-          if (m.student.id !== studentId) return m;
-          return {
-            ...m,
-            attendance: {
-              ...m.attendance,
-              status: 'absent' as const,
-              note: noteToSave,
-              isMarked: true,
-            },
-          };
-        });
-        return {
-          ...prev,
-          mentees: updatedMentees,
-        };
-      });
+      setSavedRowId(rowId);
+      setTimeout(() => setSavedRowId(null), 2500);
 
-      setSaveSuccessStudentId(studentId);
-      setTimeout(() => {
-        setSaveSuccessStudentId(null);
-        setExpandedStudentId(null);
-        setExpandedMode(null);
-        setUnsavedWarningStudentId(null);
-      }, 500);
+      // Collapse card
+      setExpandedRowId(null);
+      setUnsavedWarningRowId(null);
 
-      // Refetch whole screen in background
-      api.getGuideToday(data.date).then((refreshed) => {
-        setData(refreshed);
-      });
-    } catch {
-      setSaveErrors((prev) => ({ ...prev, [studentId]: "Couldn't save. Try again." }));
+      // Reload fresh data from database
+      await loadTodayData();
+    } catch (err: any) {
+      console.error('[handleSaveRow] error:', err);
+      setRowErrors((prev) => ({
+        ...prev,
+        [rowId]: err?.message || "Couldn't save. Try again.",
+      }));
     } finally {
-      setSavingStudentId(null);
+      setSavingRowId(null);
     }
   };
 
-  /**
-   * Save full card: status 'present', score_level (5-10) and note together.
-   * Shows short "Saved" message and collapses card after ~600ms into State C.
-   */
-  const handleSaveFull = async (studentId: string) => {
-    if (!data) return;
-    const draft = drafts[studentId];
-    if (!draft || !draft.level) return;
-
-    setSavingStudentId(studentId);
-    setSaveErrors((prev) => ({ ...prev, [studentId]: null }));
-
-    try {
-      const noteToSave = draft.note.trim() || null;
-      await api.markGuideAttendance({
-        studentId,
-        date: data.date,
-        status: 'present',
-        level: draft.level,
-        note: noteToSave,
-      });
-
-      // Update locally
-      const points = LADDER_POINTS[draft.level];
-      setData((prev) => {
-        if (!prev) return prev;
-        const updatedMentees = prev.mentees.map((m) => {
-          if (m.student.id !== studentId) return m;
-          return {
-            ...m,
-            attendance: {
-              ...m.attendance,
-              status: 'present' as const,
-              level: draft.level,
-              points,
-              note: noteToSave,
-              isMarked: true,
-            },
-          };
-        });
-        const presentCount = updatedMentees.filter((m) => m.attendance.status === 'present').length;
-        return {
-          ...prev,
-          presentCount,
-          mentees: updatedMentees,
-        };
-      });
-
-      setSaveSuccessStudentId(studentId);
-      setTimeout(() => {
-        setSaveSuccessStudentId(null);
-        setExpandedStudentId(null);
-        setExpandedMode(null);
-        setUnsavedWarningStudentId(null);
-      }, 600);
-
-      // Refetch in background
-      api.getGuideToday(data.date).then((refreshed) => {
-        setData(refreshed);
-      });
-    } catch {
-      setSaveErrors((prev) => ({ ...prev, [studentId]: "Couldn't save. Try again." }));
-    } finally {
-      setSavingStudentId(null);
-    }
+  const handleSendReminderFromSheet = async (message: string, programId: string) => {
+    if (!remindTarget) return;
+    await api.sendReminder(remindTarget.studentId, message, programId);
+    onRemindSuccess(`Reminder sent to ${remindTarget.studentName}.`);
+    // 60-second cooldown per student
+    setCooldowns((prev) => ({
+      ...prev,
+      [remindTarget.studentId]: Date.now() + 60000,
+    }));
   };
 
-  /**
-   * Cancel expanded card.
-   */
-  const handleCancelExpanded = (studentId: string) => {
-    if (checkHasUnsavedChanges(studentId)) {
-      const ok = window.confirm('Discard unsaved changes?');
-      if (!ok) return;
-    }
-    setExpandedStudentId(null);
-    setExpandedMode(null);
-    setUnsavedWarningStudentId(null);
+  const toggleProgramCollapse = (progId: string) => {
+    setCollapsedPrograms((prev) => ({ ...prev, [progId]: !prev[progId] }));
   };
-
-  // Filter students by search
-  const filteredMentees = useMemo(() => {
-    if (!data) return [];
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return data.mentees;
-    return data.mentees.filter((m) => {
-      const nameMatch = m.student.fullName.toLowerCase().includes(query);
-      const programMatch = m.programs.some((p) => p.name.toLowerCase().includes(query));
-      return nameMatch || programMatch;
-    });
-  }, [data, searchQuery]);
-
-  // Group filtered students into the 3 groups
-  const { needsScoreList, notMetYetList, doneList } = useMemo(() => {
-    const needsScore: typeof filteredMentees = [];
-    const notMetYet: typeof filteredMentees = [];
-    const done: typeof filteredMentees = [];
-
-    filteredMentees.forEach((m) => {
-      if (m.attendance.status === 'absent') {
-        notMetYet.push(m);
-      } else if (m.attendance.status === 'present' && !m.attendance.level) {
-        needsScore.push(m);
-      } else if (m.attendance.status === 'present' && Boolean(m.attendance.level)) {
-        done.push(m);
-      }
-    });
-
-    return { needsScoreList: needsScore, notMetYetList: notMetYet, doneList: done };
-  }, [filteredMentees]);
 
   if (loading) {
     return (
-      <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-        Loading today's students...
+      <div className="space-y-4">
+        <div className="h-6 w-48 bg-gray-100 rounded-lg animate-pulse" />
+        <div className="h-32 bg-[#F3F4F6] rounded-2xl animate-pulse" />
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="p-4 rounded-2xl bg-white border border-[#E5E7EB] text-sm text-[#111111] flex items-center gap-2">
-        <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-        <span>{error || 'Unable to load data.'}</span>
+      <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center space-y-3">
+        <Pentagon size={48} className="mx-auto" />
+        <p className="text-sm font-semibold text-[#111111]">{error || "Couldn't load today's sessions."}</p>
+        <button
+          onClick={loadTodayData}
+          className="px-4 py-2 bg-[#D4202C] text-white text-xs font-semibold rounded-xl"
+        >
+          Try again
+        </button>
       </div>
     );
   }
 
+  const { date, totalStudents, presentCount, programs } = data;
+  const showSearch = totalStudents > 8;
+
+  // Filter sections by search query
+  const cleanSearch = searchQuery.trim().toLowerCase();
+  const filteredPrograms = programs.map((prog) => {
+    const matchingStudents = prog.students.filter((s) => {
+      if (!cleanSearch) return true;
+      return (
+        s.studentName.toLowerCase().includes(cleanSearch) ||
+        s.username.toLowerCase().includes(cleanSearch)
+      );
+    });
+
+    // Group rows: Needs score (n), Not met yet (n), Done (n)
+    const needsScore = matchingStudents.filter(
+      (s) => s.attendance.status === 'present' && (s.attendance.scoreLevel === null || s.attendance.scoreLevel === undefined)
+    );
+    const notMetYet = matchingStudents.filter(
+      (s) => s.attendance.status === 'absent'
+    );
+    const done = matchingStudents.filter(
+      (s) => s.attendance.status === 'present' && s.attendance.scoreLevel !== null && s.attendance.scoreLevel !== undefined
+    );
+
+    return {
+      ...prog,
+      matchingStudents,
+      groups: {
+        needsScore,
+        notMetYet,
+        done,
+      },
+    };
+  });
+
   return (
-    <div className="space-y-5 pb-20">
-      {/* Header with Date and Marked Present count */}
-      <div>
-        <div className="flex flex-col sm:flex-row sm:items-baseline justify-between gap-1">
-          <h2 className="font-serif text-[28px] sm:text-[34px] font-normal text-[#111111] leading-tight">
-            Today
-          </h2>
-          <span className="text-sm font-semibold text-[#111111]">
-            {formatDisplayDate(data.date)}
-          </span>
+    <div className="space-y-6 pb-20">
+      {/* Top line: Normal text color, Marked present x of y students & Date */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-[#F3F4F6] pb-3">
+        <div>
+          <h1 className="font-serif text-[24px] sm:text-[28px] font-normal text-[#111111]">
+            Today's sessions
+          </h1>
+          <p className="text-sm text-[#111111] mt-0.5">
+            Marked present {presentCount} of {totalStudents} {totalStudents === 1 ? 'student' : 'students'}
+          </p>
         </div>
-        <p className="text-[13px] sm:text-sm text-[#111111] mt-0.5">
-          Marked present {data.presentCount} of {data.totalMentees} students
-        </p>
+        <div className="text-xs font-semibold text-[#6B7280]">
+          {formatKolkataDisplayDate(date)}
+        </div>
       </div>
 
-      {/* Search box if guide has more than 8 students */}
-      {data.mentees.length > 8 && (
+      {/* Search box (when more than 8 rows across programs) */}
+      {showSearch && (
         <div className="relative">
-          <Search className="w-4 h-4 text-[#6B7280] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280]" />
           <input
             type="text"
+            placeholder="Search students"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search students"
-            className="w-full h-11 pl-10 pr-9 rounded-[10px] bg-[#F3F4F6] text-[#111111] text-xs sm:text-sm border border-transparent focus:border-[#D4202C] focus:bg-white outline-none transition-colors"
+            className="w-full h-11 pl-9 pr-8 rounded-xl bg-[#F3F4F6] text-xs font-medium text-[#111111] placeholder:text-[#6B7280] border-0 focus:ring-2 focus:ring-[#D4202C]"
           />
           {searchQuery && (
             <button
-              type="button"
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-[#6B7280] hover:text-[#111111]"
-              aria-label="Clear search"
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6B7280] hover:text-[#111111]"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           )}
         </div>
       )}
 
-      {data.mentees.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280] flex flex-col items-center justify-center">
-          <Pentagon size={64} className="mb-2" />
-          <p>No students assigned to you yet. Please contact the administrator.</p>
-        </div>
-      ) : filteredMentees.length === 0 ? (
-        <div className="p-6 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-          No students match your search.
+      {programs.length === 0 ? (
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center space-y-2">
+          <Pentagon size={48} className="mx-auto text-[#6B7280]" />
+          <h3 className="font-bold text-base text-[#111111]">No programs assigned</h3>
+          <p className="text-xs text-[#6B7280]">
+            You have not been assigned to guide any competition programs yet.
+          </p>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* GROUP 1: Needs score (n) */}
-          {needsScoreList.length > 0 && (
-            <section aria-labelledby="heading-needs-score" className="space-y-2.5">
-              <h3 id="heading-needs-score" className="text-sm font-bold text-[#111111]">
-                Needs score ({needsScoreList.length})
-              </h3>
-              <div className="space-y-2.5">
-                {needsScoreList.map((mentee) => {
-                  const student = mentee.student;
-                  const isExpanded = expandedStudentId === student.id;
-                  const draft = drafts[student.id] || {
-                    status: 'present',
-                    level: null,
-                    note: mentee.attendance.note || '',
-                    originalStatus: 'present',
-                    originalLevel: null,
-                    originalNote: mentee.attendance.note || '',
-                  };
-                  const isSaving = savingStudentId === student.id;
-                  const saveSuccess = saveSuccessStudentId === student.id;
-                  const saveError = saveErrors[student.id];
-                  const hasUnsavedWarning = unsavedWarningStudentId === student.id;
-                  const remainingCooldown = getCooldownRemaining(student.id);
-                  const isRemindDisabled = remainingCooldown > 0;
+          {filteredPrograms.map((prog) => {
+            const isCollapsed = Boolean(collapsedPrograms[prog.programId]);
+            const allProgStudents = prog.students.map((s) => ({
+              id: s.studentId,
+              name: s.studentName,
+            }));
 
-                  return (
-                    <div
-                      key={student.id}
-                      className="rounded-2xl bg-[#F3F4F6] border border-transparent transition-all overflow-hidden"
+            return (
+              <div
+                key={prog.programId}
+                className="rounded-2xl border border-[#E5E7EB] bg-white overflow-hidden shadow-2xs"
+              >
+                {/* Program Section Heading */}
+                <div className="p-4 sm:p-5 bg-[#F9FAFB] border-b border-[#E5E7EB] flex items-center justify-between gap-3">
+                  <div
+                    onClick={() => programs.length > 1 && toggleProgramCollapse(prog.programId)}
+                    className={`flex items-center gap-2 min-w-0 ${programs.length > 1 ? 'cursor-pointer select-none' : ''}`}
+                  >
+                    <h2 className="font-bold text-base sm:text-lg text-[#111111] truncate">
+                      {prog.programName} ({prog.studentsCount} {prog.studentsCount === 1 ? 'student' : 'students'})
+                    </h2>
+                    {programs.length > 1 && (
+                      <button type="button" className="p-1 text-[#6B7280] hover:text-[#111111]">
+                        {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {/* Message button for this program */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMessageTarget({
+                          programId: prog.programId,
+                          programName: prog.programName,
+                          students: allProgStudents,
+                        })
+                      }
+                      className="px-3 py-1.5 rounded-xl bg-white border border-[#E5E7EB] hover:bg-gray-50 text-xs font-semibold text-[#111111] transition-colors cursor-pointer flex items-center gap-1.5"
                     >
-                      {/* State B Expanded Card Layout */}
-                      <div className="p-4 sm:p-5 space-y-3.5">
-                        {/* Name and programs + Remind button */}
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <h4 className="font-bold text-base text-[#111111] truncate">
-                              {student.fullName}
-                            </h4>
-                            <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-                              {formatProgramsOneLine(mentee.programs)}
-                            </p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setRemindSheetTarget({ id: student.id, name: student.fullName })
-                            }
-                            disabled={isRemindDisabled}
-                            className="w-[44px] h-[44px] rounded-[10px] bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center shrink-0 transition-colors"
-                            title={isRemindDisabled ? `Wait ${remainingCooldown}s to remind again` : 'Send reminder'}
-                            aria-label={`Remind ${student.fullName}`}
-                          >
-                            <Bell className="w-4 h-4 text-[#D4202C]" />
-                          </button>
-                        </div>
+                      <MessageSquare className="w-3.5 h-3.5 text-[#D4202C]" />
+                      <span>Message</span>
+                    </button>
+                  </div>
+                </div>
 
-                        {/* Present / Absent toggle (Present selected) */}
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => updateDraft(student.id, { status: 'present' })}
-                            className="h-11 rounded-xl text-xs sm:text-sm font-semibold bg-[#D4202C] text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                          >
-                            <Check className="w-4 h-4 stroke-[3]" />
-                            <span>Present</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleToAbsent(student.id)}
-                            disabled={isSaving}
-                            className="h-11 rounded-xl text-xs sm:text-sm font-semibold bg-white border border-[#E5E7EB] text-[#6B7280] hover:text-[#111111] hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                          >
-                            <span>-</span>
-                            <span>Absent</span>
-                          </button>
-                        </div>
-
-                        {/* Label: Not scored yet */}
-                        <div className="flex items-center justify-between text-xs font-semibold text-[#6B7280] pt-0.5">
-                          <span>Not scored yet</span>
-                          {draft.level && (
-                            <span className="text-[#111111] font-bold">
-                              Selected: {draft.level}
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Six levels in 2 cols on mobile, 3 on wide screens */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                          {LADDER_OPTIONS.map((opt) => {
-                            const isSelected = draft.level === opt.level;
-                            return (
-                              <button
-                                key={opt.level}
-                                type="button"
-                                onClick={() => updateDraft(student.id, { level: opt.level })}
-                                disabled={isSaving}
-                                className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-semibold text-center transition-colors flex items-center justify-center cursor-pointer ${
-                                  isSelected
-                                    ? 'bg-[#D4202C] text-white'
-                                    : 'bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100'
-                                }`}
-                              >
-                                {opt.label}
-                              </button>
-                            );
-                          })}
-                        </div>
-
-                        {/* Note field with 500-char counter */}
-                        <div className="space-y-1">
-                          <textarea
-                            value={draft.note}
-                            maxLength={500}
-                            onChange={(e) => updateDraft(student.id, { note: e.target.value })}
-                            placeholder="Note about today's work (optional)"
-                            rows={3}
-                            disabled={isSaving}
-                            className="w-full p-3 rounded-xl bg-white border border-[#E5E7EB] text-xs sm:text-sm text-[#111111] placeholder-[#6B7280] outline-none focus:border-[#D4202C] resize-none transition-colors"
-                          />
-                          <div className="flex justify-end text-xs text-[#6B7280]">
-                            <span>{draft.note.length}/500</span>
-                          </div>
-                        </div>
-
-                        {/* Feedback messages */}
-                        {hasUnsavedWarning && (
-                          <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                            <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                            <span>You have unsaved changes</span>
-                          </div>
-                        )}
-                        {saveError && (
-                          <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs text-[#111111] flex items-center gap-1.5">
-                            <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                            <span>{saveError}</span>
-                          </div>
-                        )}
-                        {saveSuccess && (
-                          <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                            <Check className="w-4 h-4 text-[#28B058] shrink-0 stroke-[3]" />
-                            <span>Saved</span>
-                          </div>
-                        )}
-
-                        {/* Red Save button (disabled until a level is chosen) */}
-                        <button
-                          type="button"
-                          onClick={() => handleSaveFull(student.id)}
-                          disabled={!draft.level || isSaving}
-                          className="w-full h-12 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer"
-                        >
-                          {isSaving ? 'Saving...' : 'Save'}
-                        </button>
+                {/* Program Section Content */}
+                {!isCollapsed && (
+                  <div className="p-4 sm:p-5 space-y-5">
+                    {prog.matchingStudents.length === 0 ? (
+                      <div className="p-4 text-center text-xs text-[#6B7280] bg-[#F9FAFB] rounded-xl">
+                        {searchQuery ? `No students matching "${searchQuery}" in ${prog.programName}.` : 'No students enrolled in this program.'}
                       </div>
-                    </div>
-                  );
-                })}
+                    ) : (
+                      <>
+                        {/* Group: Needs score (n) */}
+                        {prog.groups.needsScore.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs font-bold text-[#D4202C] tracking-wide">
+                              Needs score ({prog.groups.needsScore.length})
+                            </div>
+                            <div className="space-y-2">
+                              {prog.groups.needsScore.map((s) =>
+                                renderStudentCard(s, prog.programId, prog.programName)
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Group: Not met yet (n) */}
+                        {prog.groups.notMetYet.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs font-bold text-[#6B7280] tracking-wide">
+                              Not met yet ({prog.groups.notMetYet.length})
+                            </div>
+                            <div className="space-y-2">
+                              {prog.groups.notMetYet.map((s) =>
+                                renderStudentCard(s, prog.programId, prog.programName)
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Group: Done (n) */}
+                        {prog.groups.done.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="text-xs font-bold text-[#111111] tracking-wide">
+                              Done ({prog.groups.done.length})
+                            </div>
+                            <div className="space-y-2">
+                              {prog.groups.done.map((s) =>
+                                renderStudentCard(s, prog.programId, prog.programName)
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
-            </section>
-          )}
-
-          {/* GROUP 2: Not met yet (n) */}
-          {notMetYetList.length > 0 && (
-            <section aria-labelledby="heading-not-met-yet" className="space-y-2.5">
-              <h3 id="heading-not-met-yet" className="text-sm font-bold text-[#111111]">
-                Not met yet ({notMetYetList.length})
-              </h3>
-              <div className="space-y-2.5">
-                {notMetYetList.map((mentee) => {
-                  const student = mentee.student;
-                  const isExpanded = expandedStudentId === student.id;
-                  const mode = expandedMode;
-                  const draft = drafts[student.id] || {
-                    status: 'absent',
-                    level: null,
-                    note: mentee.attendance.note || '',
-                    originalStatus: 'absent',
-                    originalLevel: null,
-                    originalNote: mentee.attendance.note || '',
-                  };
-                  const isSaving = savingStudentId === student.id;
-                  const saveSuccess = saveSuccessStudentId === student.id;
-                  const saveError = saveErrors[student.id];
-                  const hasUnsavedWarning = unsavedWarningStudentId === student.id;
-                  const remainingCooldown = getCooldownRemaining(student.id);
-                  const isRemindDisabled = remainingCooldown > 0;
-
-                  // Expanded into State B (Present & needs score) because user tapped "Mark present"
-                  if (isExpanded && mode === 'present_score') {
-                    return (
-                      <div
-                        key={student.id}
-                        className="rounded-2xl bg-[#F3F4F6] border border-transparent transition-all overflow-hidden"
-                      >
-                        <div className="p-4 sm:p-5 space-y-3.5">
-                          {/* Name and programs + Remind button */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <h4 className="font-bold text-base text-[#111111] truncate">
-                                {student.fullName}
-                              </h4>
-                              <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-                                {formatProgramsOneLine(mentee.programs)}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRemindSheetTarget({ id: student.id, name: student.fullName })
-                              }
-                              disabled={isRemindDisabled}
-                              className="w-[44px] h-[44px] rounded-[10px] bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center shrink-0 transition-colors"
-                              title={isRemindDisabled ? `Wait ${remainingCooldown}s to remind again` : 'Send reminder'}
-                              aria-label={`Remind ${student.fullName}`}
-                            >
-                              <Bell className="w-4 h-4 text-[#D4202C]" />
-                            </button>
-                          </div>
-
-                          {/* Present / Absent toggle */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => updateDraft(student.id, { status: 'present' })}
-                              className="h-11 rounded-xl text-xs sm:text-sm font-semibold bg-[#D4202C] text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <Check className="w-4 h-4 stroke-[3]" />
-                              <span>Present</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCancelExpanded(student.id)}
-                              className="h-11 rounded-xl text-xs sm:text-sm font-semibold bg-white border border-[#E5E7EB] text-[#6B7280] hover:text-[#111111] hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <span>-</span>
-                              <span>Absent</span>
-                            </button>
-                          </div>
-
-                          {/* Label: Not scored yet */}
-                          <div className="flex items-center justify-between text-xs font-semibold text-[#6B7280] pt-0.5">
-                            <span>Not scored yet</span>
-                            {draft.level && (
-                              <span className="text-[#111111] font-bold">
-                                Selected: {draft.level}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Six levels in 2 cols on mobile, 3 on wide screens */}
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {LADDER_OPTIONS.map((opt) => {
-                              const isSelected = draft.level === opt.level;
-                              return (
-                                <button
-                                  key={opt.level}
-                                  type="button"
-                                  onClick={() => updateDraft(student.id, { level: opt.level })}
-                                  disabled={isSaving}
-                                  className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-semibold text-center transition-colors flex items-center justify-center cursor-pointer ${
-                                    isSelected
-                                      ? 'bg-[#D4202C] text-white'
-                                      : 'bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100'
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {/* Note field with 500-char counter */}
-                          <div className="space-y-1">
-                            <textarea
-                              value={draft.note}
-                              maxLength={500}
-                              onChange={(e) => updateDraft(student.id, { note: e.target.value })}
-                              placeholder="Note about today's work (optional)"
-                              rows={3}
-                              disabled={isSaving}
-                              className="w-full p-3 rounded-xl bg-white border border-[#E5E7EB] text-xs sm:text-sm text-[#111111] placeholder-[#6B7280] outline-none focus:border-[#D4202C] resize-none transition-colors"
-                            />
-                            <div className="flex justify-end text-xs text-[#6B7280]">
-                              <span>{draft.note.length}/500</span>
-                            </div>
-                          </div>
-
-                          {/* Feedback messages */}
-                          {hasUnsavedWarning && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                              <span>You have unsaved changes</span>
-                            </div>
-                          )}
-                          {saveError && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs text-[#111111] flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                              <span>{saveError}</span>
-                            </div>
-                          )}
-                          {saveSuccess && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                              <Check className="w-4 h-4 text-[#28B058] shrink-0 stroke-[3]" />
-                              <span>Saved</span>
-                            </div>
-                          )}
-
-                          {/* Actions: Save button (disabled until a level is chosen) + Cancel link */}
-                          <button
-                            type="button"
-                            onClick={() => handleSaveFull(student.id)}
-                            disabled={!draft.level || isSaving}
-                            className="w-full h-12 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer"
-                          >
-                            {isSaving ? 'Saving...' : 'Save'}
-                          </button>
-                          <div className="text-center pt-0.5">
-                            <button
-                              type="button"
-                              onClick={() => handleCancelExpanded(student.id)}
-                              className="text-xs text-[#6B7280] hover:text-[#111111] underline cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // Expanded into Note-Only Card (tapping row itself while absent)
-                  if (isExpanded && mode === 'absent_note') {
-                    return (
-                      <div
-                        key={student.id}
-                        className="rounded-2xl bg-[#F3F4F6] border border-transparent transition-all overflow-hidden"
-                      >
-                        <div className="p-4 sm:p-5 space-y-3.5">
-                          {/* Name and programs + Remind button */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2">
-                                <h4 className="font-bold text-base text-[#111111] truncate">
-                                  {student.fullName}
-                                </h4>
-                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E5E7EB] text-[#6B7280] text-xs font-semibold">
-                                  <span className="font-bold leading-none">-</span>
-                                  <span>Absent</span>
-                                </span>
-                              </div>
-                              <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-                                {formatProgramsOneLine(mentee.programs)}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRemindSheetTarget({ id: student.id, name: student.fullName })
-                              }
-                              disabled={isRemindDisabled}
-                              className="w-[44px] h-[44px] rounded-[10px] bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center shrink-0 transition-colors"
-                              title={isRemindDisabled ? `Wait ${remainingCooldown}s to remind again` : 'Send reminder'}
-                              aria-label={`Remind ${student.fullName}`}
-                            >
-                              <Bell className="w-4 h-4 text-[#D4202C]" />
-                            </button>
-                          </div>
-
-                          {/* Note field with 500-char counter */}
-                          <div className="space-y-1">
-                            <textarea
-                              value={draft.note}
-                              maxLength={500}
-                              onChange={(e) => updateDraft(student.id, { note: e.target.value })}
-                              placeholder="Note about today's work (optional)"
-                              rows={3}
-                              disabled={isSaving}
-                              className="w-full p-3 rounded-xl bg-white border border-[#E5E7EB] text-xs sm:text-sm text-[#111111] placeholder-[#6B7280] outline-none focus:border-[#D4202C] resize-none transition-colors"
-                            />
-                            <div className="flex justify-end text-xs text-[#6B7280]">
-                              <span>{draft.note.length}/500</span>
-                            </div>
-                          </div>
-
-                          {/* Feedback messages */}
-                          {hasUnsavedWarning && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                              <span>You have unsaved changes</span>
-                            </div>
-                          )}
-                          {saveError && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs text-[#111111] flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                              <span>{saveError}</span>
-                            </div>
-                          )}
-                          {saveSuccess && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                              <Check className="w-4 h-4 text-[#28B058] shrink-0 stroke-[3]" />
-                              <span>Saved</span>
-                            </div>
-                          )}
-
-                          {/* Save note + Cancel */}
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => handleSaveNoteOnly(student.id)}
-                              disabled={isSaving}
-                              className="flex-1 h-11 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-white text-xs sm:text-sm font-semibold transition-colors disabled:opacity-50 flex items-center justify-center cursor-pointer"
-                            >
-                              {isSaving ? 'Saving note...' : 'Save note'}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCancelExpanded(student.id)}
-                              disabled={isSaving}
-                              className="px-4 h-11 rounded-[10px] bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 transition-colors cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // Compact Row (Default State A)
-                  return (
-                    <div
-                      key={student.id}
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={false}
-                      onClick={() => handleRowClickStateA(student.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleRowClickStateA(student.id);
-                        }
-                      }}
-                      className="min-h-[56px] p-3 sm:p-3.5 rounded-2xl bg-[#F3F4F6] flex items-center justify-between gap-3 hover:bg-gray-200/60 transition-colors cursor-pointer select-none"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-sm text-[#111111] truncate">
-                            {student.fullName}
-                          </span>
-                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#E5E7EB] text-[#6B7280] text-xs font-semibold shrink-0">
-                            <span className="font-bold leading-none">-</span>
-                            <span>Absent</span>
-                          </span>
-                        </div>
-                        <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-                          {formatProgramsOneLine(mentee.programs)}
-                        </p>
-                        {mentee.attendance.note && (
-                          <p className="text-[13px] text-[#6B7280] italic truncate mt-0.5">
-                            Note: {mentee.attendance.note}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleMarkPresent(student.id);
-                          }}
-                          className="h-[44px] px-3 sm:px-4 rounded-[10px] bg-white border border-[#D4202C] text-[#D4202C] hover:bg-red-50 text-xs sm:text-sm font-semibold transition-colors flex items-center justify-center shrink-0 cursor-pointer"
-                          aria-label={`Mark ${student.fullName} present`}
-                        >
-                          Mark present
-                        </button>
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRemindSheetTarget({ id: student.id, name: student.fullName });
-                          }}
-                          disabled={isRemindDisabled}
-                          className="w-[44px] h-[44px] rounded-[10px] bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center shrink-0 transition-colors cursor-pointer"
-                          title={isRemindDisabled ? `Wait ${remainingCooldown}s to remind again` : 'Send reminder'}
-                          aria-label={`Remind ${student.fullName}`}
-                        >
-                          <Bell className="w-4 h-4 text-[#D4202C]" />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
-
-          {/* GROUP 3: Done (n) */}
-          {doneList.length > 0 && (
-            <section aria-labelledby="heading-done" className="space-y-2.5">
-              <h3 id="heading-done" className="text-sm font-bold text-[#111111]">
-                Done ({doneList.length})
-              </h3>
-              <div className="space-y-2.5">
-                {doneList.map((mentee) => {
-                  const student = mentee.student;
-                  const isExpanded = expandedStudentId === student.id;
-                  const draft = drafts[student.id] || {
-                    status: 'present',
-                    level: mentee.attendance.level,
-                    note: mentee.attendance.note || '',
-                    originalStatus: 'present',
-                    originalLevel: mentee.attendance.level,
-                    originalNote: mentee.attendance.note || '',
-                  };
-                  const isSaving = savingStudentId === student.id;
-                  const saveSuccess = saveSuccessStudentId === student.id;
-                  const saveError = saveErrors[student.id];
-                  const hasUnsavedWarning = unsavedWarningStudentId === student.id;
-                  const remainingCooldown = getCooldownRemaining(student.id);
-                  const isRemindDisabled = remainingCooldown > 0;
-
-                  const streakText = mentee.streak === 1 ? '1 day streak' : `${mentee.streak} days streak`;
-                  const pointsText = mentee.totalPoints === 1 ? '1 point' : `${mentee.totalPoints} points`;
-                  const marks = mentee.attendance.level ? LADDER_POINTS[mentee.attendance.level] : '';
-
-                  if (isExpanded) {
-                    return (
-                      <div
-                        key={student.id}
-                        className="rounded-2xl bg-[#F3F4F6] border border-transparent transition-all overflow-hidden"
-                      >
-                        <div className="p-4 sm:p-5 space-y-3.5">
-                          {/* Name and programs + Remind button */}
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <h4 className="font-bold text-base text-[#111111] truncate">
-                                {student.fullName}
-                              </h4>
-                              <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-                                {formatProgramsOneLine(mentee.programs)}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRemindSheetTarget({ id: student.id, name: student.fullName })
-                              }
-                              disabled={isRemindDisabled}
-                              className="w-[44px] h-[44px] rounded-[10px] bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100 disabled:opacity-50 flex items-center justify-center shrink-0 transition-colors"
-                              title={isRemindDisabled ? `Wait ${remainingCooldown}s to remind again` : 'Send reminder'}
-                              aria-label={`Remind ${student.fullName}`}
-                            >
-                              <Bell className="w-4 h-4 text-[#D4202C]" />
-                            </button>
-                          </div>
-
-                          {/* Present / Absent toggle */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <button
-                              type="button"
-                              onClick={() => updateDraft(student.id, { status: 'present' })}
-                              className="h-11 rounded-xl text-xs sm:text-sm font-semibold bg-[#D4202C] text-white flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                            >
-                              <Check className="w-4 h-4 stroke-[3]" />
-                              <span>Present</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleToggleToAbsent(student.id)}
-                              disabled={isSaving}
-                              className="h-11 rounded-xl text-xs sm:text-sm font-semibold bg-white border border-[#E5E7EB] text-[#6B7280] hover:text-[#111111] hover:bg-gray-50 flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-                            >
-                              <span>-</span>
-                              <span>Absent</span>
-                            </button>
-                          </div>
-
-                          {/* Level indicator */}
-                          <div className="flex items-center justify-between text-xs font-semibold text-[#6B7280] pt-0.5">
-                            <span>Daily preparation score</span>
-                            {draft.level && (
-                              <span className="text-[#111111] font-bold">
-                                {LADDER_POINTS[draft.level]} points ({draft.level})
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Six levels in 2 cols on mobile, 3 on wide screens */}
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                            {LADDER_OPTIONS.map((opt) => {
-                              const isSelected = draft.level === opt.level;
-                              return (
-                                <button
-                                  key={opt.level}
-                                  type="button"
-                                  onClick={() => updateDraft(student.id, { level: opt.level })}
-                                  disabled={isSaving}
-                                  className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-semibold text-center transition-colors flex items-center justify-center cursor-pointer ${
-                                    isSelected
-                                      ? 'bg-[#D4202C] text-white'
-                                      : 'bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-100'
-                                  }`}
-                                >
-                                  {opt.label}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {/* Note field with 500-char counter */}
-                          <div className="space-y-1">
-                            <textarea
-                              value={draft.note}
-                              maxLength={500}
-                              onChange={(e) => updateDraft(student.id, { note: e.target.value })}
-                              placeholder="Note about today's work (optional)"
-                              rows={3}
-                              disabled={isSaving}
-                              className="w-full p-3 rounded-xl bg-white border border-[#E5E7EB] text-xs sm:text-sm text-[#111111] placeholder-[#6B7280] outline-none focus:border-[#D4202C] resize-none transition-colors"
-                            />
-                            <div className="flex justify-end text-xs text-[#6B7280]">
-                              <span>{draft.note.length}/500</span>
-                            </div>
-                          </div>
-
-                          {/* Feedback messages */}
-                          {hasUnsavedWarning && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                              <span>You have unsaved changes</span>
-                            </div>
-                          )}
-                          {saveError && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs text-[#111111] flex items-center gap-1.5">
-                              <AlertCircle className="w-4 h-4 text-[#D4202C] shrink-0" />
-                              <span>{saveError}</span>
-                            </div>
-                          )}
-                          {saveSuccess && (
-                            <div className="p-2.5 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] flex items-center gap-1.5">
-                              <Check className="w-4 h-4 text-[#28B058] shrink-0 stroke-[3]" />
-                              <span>Saved</span>
-                            </div>
-                          )}
-
-                          {/* Actions: Save button + Cancel link */}
-                          <button
-                            type="button"
-                            onClick={() => handleSaveFull(student.id)}
-                            disabled={!draft.level || isSaving}
-                            className="w-full h-12 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] active:bg-[#B81B26] text-white text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center cursor-pointer"
-                          >
-                            {isSaving ? 'Saving...' : 'Save'}
-                          </button>
-                          <div className="text-center pt-0.5">
-                            <button
-                              type="button"
-                              onClick={() => handleCancelExpanded(student.id)}
-                              className="text-xs text-[#6B7280] hover:text-[#111111] underline cursor-pointer"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  // State C Compact Row
-                  return (
-                    <div
-                      key={student.id}
-                      role="button"
-                      tabIndex={0}
-                      aria-expanded={false}
-                      onClick={() => handleRowClickStateC(student.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          handleRowClickStateC(student.id);
-                        }
-                      }}
-                      className="min-h-[56px] p-3 sm:p-3.5 rounded-2xl bg-[#F3F4F6] flex items-center justify-between gap-3 hover:bg-gray-200/60 transition-colors cursor-pointer select-none"
-                    >
-                      <div className="min-w-0 flex-1">
-                        <span className="font-bold text-sm text-[#111111] block truncate">
-                          {student.fullName}
-                        </span>
-                        <p className="text-[13px] text-[#6B7280] truncate mt-0.5">
-                          Present · {marks} {mentee.attendance.level} · {streakText} · {pointsText}
-                        </p>
-                        {mentee.attendance.note && (
-                          <p className="text-[13px] text-[#6B7280] italic truncate mt-0.5">
-                            Note: {mentee.attendance.note}
-                          </p>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1.5 shrink-0 text-[#6B7280]">
-                        <ChevronDown className="w-4 h-4" />
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+            );
+          })}
         </div>
       )}
 
       {/* Remind Sheet */}
-      {remindSheetTarget && (
+      {remindTarget && (
         <RemindSheet
-          isOpen={true}
-          studentId={remindSheetTarget.id}
-          studentName={remindSheetTarget.name}
-          onClose={() => setRemindSheetTarget(null)}
-          onSend={handleSendReminder}
+          isOpen={Boolean(remindTarget)}
+          studentName={remindTarget.studentName}
+          studentId={remindTarget.studentId}
+          programId={remindTarget.programId}
+          programName={remindTarget.programName}
+          onClose={() => setRemindTarget(null)}
+          onSend={handleSendReminderFromSheet}
+        />
+      )}
+
+      {/* Message Sheet */}
+      {messageTarget && (
+        <GuideMessageSheet
+          isOpen={Boolean(messageTarget)}
+          programId={messageTarget.programId}
+          programName={messageTarget.programName}
+          students={messageTarget.students}
+          initialRecipientIds={messageTarget.initialRecipientIds}
+          onClose={() => setMessageTarget(null)}
+          onSent={(msg) => onRemindSuccess(msg)}
         />
       )}
     </div>
   );
+
+  // -------------------------------------------------------------
+  // RENDER STUDENT ROW / CARD
+  // -------------------------------------------------------------
+  function renderStudentCard(
+    s: { studentId: string; studentName: string; username: string; attendance: AttendanceRecord; note: string | null },
+    programId: string,
+    programName: string
+  ) {
+    const rowId = s.attendance.id;
+    const isExpanded = expandedRowId === rowId;
+    const isSaving = savingRowId === rowId;
+    const isSaved = savedRowId === rowId;
+    const rowError = rowErrors[rowId];
+    const hasUnsavedWarning = unsavedWarningRowId === rowId;
+
+    const draft = drafts[rowId] || {
+      status: s.attendance.status,
+      scoreLevel: s.attendance.scoreLevel,
+      note: s.attendance.note || '',
+      originalStatus: s.attendance.status,
+      originalScoreLevel: s.attendance.scoreLevel,
+      originalNote: s.attendance.note || '',
+    };
+
+    const isCooldownActive = Boolean(cooldowns[s.studentId] && cooldowns[s.studentId] > Date.now());
+    const cooldownRemainingSec = isCooldownActive
+      ? Math.ceil((cooldowns[s.studentId] - Date.now()) / 1000)
+      : 0;
+
+    // Derived states
+    const isAbsent = s.attendance.status === 'absent';
+    const isNeedsScore = s.attendance.status === 'present' && (s.attendance.scoreLevel === null || s.attendance.scoreLevel === undefined);
+    const isDone = s.attendance.status === 'present' && s.attendance.scoreLevel !== null && s.attendance.scoreLevel !== undefined;
+
+    // A) Not met yet (absent): compact row
+    if (isAbsent && !isExpanded) {
+      return (
+        <div
+          key={rowId}
+          onClick={() => handleRowClick(rowId, s.attendance, 'note_only')}
+          className="p-3.5 rounded-xl border border-[#E5E7EB] bg-white hover:bg-[#F9FAFB] transition-colors cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-sm text-[#111111]">{s.studentName}</span>
+              <span className="px-2 py-0.5 rounded-md bg-[#F3F4F6] text-[#6B7280] text-xs font-semibold">
+                Absent
+              </span>
+            </div>
+            {s.attendance.note && (
+              <p className="text-xs text-[#6B7280] truncate mt-1">
+                {s.attendance.note}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Red-outline Mark Present button */}
+            <button
+              type="button"
+              onClick={(e) => handleMarkPresentQuick(e, rowId)}
+              className="h-10 px-4 rounded-xl border-2 border-[#D4202C] text-[#D4202C] hover:bg-red-50 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              Mark present
+            </button>
+
+            {/* Bell button */}
+            <button
+              type="button"
+              disabled={isCooldownActive}
+              onClick={(e) => {
+                e.stopPropagation();
+                setRemindTarget({
+                  studentId: s.studentId,
+                  studentName: s.studentName,
+                  programId,
+                  programName,
+                });
+              }}
+              className="h-10 w-10 rounded-xl border border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#111111] hover:bg-gray-50 flex items-center justify-center transition-colors disabled:opacity-50 cursor-pointer shrink-0"
+              title={isCooldownActive ? `Wait ${cooldownRemainingSec}s` : 'Send reminder'}
+            >
+              <Bell className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // C) Done: compact row
+    if (isDone && !isExpanded) {
+      const levelLabel = s.attendance.scoreLevel && s.attendance.scoreLevel in SCORE_LEVEL_MAP
+        ? (SCORE_LEVEL_MAP as any)[s.attendance.scoreLevel]
+        : '';
+
+      return (
+        <div
+          key={rowId}
+          onClick={() => handleRowClick(rowId, s.attendance, 'score')}
+          className="p-3.5 rounded-xl border border-[#E5E7EB] bg-white hover:bg-[#F9FAFB] transition-colors cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-sm text-[#111111]">{s.studentName}</span>
+              <span className="text-xs font-semibold text-[#111111]">
+                Present · {s.attendance.scoreLevel} {levelLabel}
+              </span>
+            </div>
+            {s.attendance.note && (
+              <p className="text-xs text-[#6B7280] truncate mt-1">
+                {s.attendance.note}
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="text-xs font-semibold text-[#D4202C] hover:underline">
+              Edit
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // B) Expanded card (Needs score or editing)
+    return (
+      <div
+        key={rowId}
+        className="p-4 sm:p-5 rounded-2xl border-2 border-[#D4202C] bg-white space-y-4 shadow-sm"
+      >
+        <div className="flex items-center justify-between pb-2 border-b border-[#F3F4F6]">
+          <div>
+            <h3 className="font-bold text-sm sm:text-base text-[#111111]">
+              {s.studentName}
+            </h3>
+            <span className="text-xs text-[#6B7280]">
+              {draft.status === 'present'
+                ? draft.scoreLevel !== null && draft.scoreLevel !== undefined
+                  ? `Present · ${draft.scoreLevel} ${(SCORE_LEVEL_MAP as any)[draft.scoreLevel]}`
+                  : 'Not scored yet'
+                : 'Absent'}
+            </span>
+          </div>
+
+          {/* Present / Absent toggle */}
+          <div className="flex items-center gap-1 p-1 bg-[#F3F4F6] rounded-xl">
+            <button
+              type="button"
+              onClick={() => handleTogglePresentAbsent(rowId, 'present')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                draft.status === 'present'
+                  ? 'bg-white text-[#D4202C] shadow-2xs'
+                  : 'text-[#6B7280] hover:text-[#111111]'
+              }`}
+            >
+              Present
+            </button>
+            <button
+              type="button"
+              onClick={() => handleTogglePresentAbsent(rowId, 'absent')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                draft.status === 'absent'
+                  ? 'bg-white text-[#111111] shadow-2xs'
+                  : 'text-[#6B7280] hover:text-[#111111]'
+              }`}
+            >
+              Absent
+            </button>
+          </div>
+        </div>
+
+        {/* Warning if trying to navigate away with unsaved changes */}
+        {hasUnsavedWarning && (
+          <div className="p-3 rounded-xl bg-amber-50 text-xs font-semibold text-amber-800 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>You have unsaved changes. Save or cancel first.</span>
+          </div>
+        )}
+
+        {/* Error message */}
+        {rowError && (
+          <div className="p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{rowError}</span>
+          </div>
+        )}
+
+        {/* Score Levels: 2 columns on phones, 6 levels, only when Present */}
+        {draft.status === 'present' && (
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-[#111111]">
+              Score level {draft.scoreLevel === null ? '(choose one)' : ''}
+            </label>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {LADDER_OPTIONS.map((opt) => {
+                const isSelected = draft.scoreLevel === opt.score;
+                return (
+                  <button
+                    key={opt.score}
+                    type="button"
+                    onClick={() => {
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [rowId]: {
+                          ...draft,
+                          scoreLevel: opt.score,
+                        },
+                      }));
+                    }}
+                    className={`h-11 px-3 rounded-xl text-xs font-semibold border text-left flex items-center justify-between transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'border-[#D4202C] bg-red-50 text-[#D4202C]'
+                        : 'border-[#E5E7EB] bg-white text-[#111111] hover:bg-gray-50'
+                    }`}
+                  >
+                    <span>{opt.label}</span>
+                    {isSelected && <Check className="w-4 h-4 text-[#D4202C]" />}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Note box: ALWAYS VISIBLE */}
+        <div className="space-y-1">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-semibold text-[#111111]">
+              Note about today's work (optional)
+            </label>
+            <span className={`text-[11px] ${draft.note.length > 500 ? 'text-[#D4202C] font-bold' : 'text-[#6B7280]'}`}>
+              {draft.note.length}/500
+            </span>
+          </div>
+          <textarea
+            rows={2}
+            maxLength={500}
+            value={draft.note}
+            onChange={(e) => {
+              const val = e.target.value;
+              setDrafts((prev) => ({
+                ...prev,
+                [rowId]: {
+                  ...draft,
+                  note: val,
+                },
+              }));
+            }}
+            placeholder="Feedback, memorisation progress, practice points..."
+            className="w-full p-3 rounded-xl bg-[#F3F4F6] text-xs font-medium text-[#111111] placeholder:text-[#6B7280] border-0 focus:ring-2 focus:ring-[#D4202C] resize-none"
+          />
+        </div>
+
+        {/* Footer actions */}
+        <div className="flex items-center justify-between pt-2 border-t border-[#F3F4F6]">
+          <button
+            type="button"
+            onClick={() => {
+              setExpandedRowId(null);
+              setUnsavedWarningRowId(null);
+            }}
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer"
+          >
+            Cancel
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSaveRow(rowId)}
+            disabled={
+              isSaving ||
+              (draft.status === 'present' && draft.scoreLevel === null && expandedMode === 'score')
+            }
+            className="h-10 px-6 rounded-xl bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold transition-colors flex items-center gap-2 cursor-pointer"
+          >
+            {isSaving ? 'Saving...' : isSaved ? 'Saved' : 'Save'}
+          </button>
+        </div>
+      </div>
+    );
+  }
 };

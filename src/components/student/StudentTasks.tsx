@@ -69,17 +69,11 @@ export const StudentTasks: React.FC<StudentTasksProps> = ({
       let submissionFileId: string | null = null;
       let submissionFileName: string | null = null;
 
-      if (selectedFile) {
-        const uploadRes = await api.uploadFile(selectedFile, 'submission_attachment');
-        submissionFileId = uploadRes.fileId;
-        submissionFileName = uploadRes.originalName;
-      }
-
-      await api.submitStudentTask(selectedTask.id, {
-        submissionFileId,
-        submissionFileName,
-        submissionNote: submissionNote || null,
-      });
+      await api.submitStudentTask(
+        selectedTask.id,
+        submissionNote || '',
+        selectedFile || undefined
+      );
 
       handleCloseModal();
       onRefresh();
@@ -140,7 +134,7 @@ export const StudentTasks: React.FC<StudentTasksProps> = ({
             </div>
           ) : (
             pendingTasks.map((task) => {
-              const isAwaitingReview = task.status === 'awaiting_review';
+              const isAwaitingReview = task.status === 'submitted';
               return (
                 <div
                   key={task.id}

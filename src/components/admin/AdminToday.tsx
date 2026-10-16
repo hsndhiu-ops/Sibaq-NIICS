@@ -166,21 +166,23 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
 
   const isSearching = Boolean(searchQuery.trim());
 
-  // Filter roster by student name or guide name
-  const filteredRoster = (data?.roster || []).filter((row) => {
-    if (!isSearching) return true;
-    return matchesSearch(row.studentName, searchQuery) || matchesSearch(row.guideName, searchQuery);
-  });
+  const roster = data?.studentsRoster || (data as any)?.roster || [];
+  const guidesList = data?.guidesProgress || (data as any)?.guidesStatus || [];
 
-  // Filter guides' progress list by guide name or if any student of this guide matches
-  const filteredGuidesStatus = (data?.guidesStatus || []).filter((g) => {
+  // Filter roster by student name or roll
+  const filteredRoster = roster.filter((row: any) => {
     if (!isSearching) return true;
     return (
-      matchesSearch(g.guideName, searchQuery) ||
-      (data?.roster || []).some(
-        (r) => r.guideId === g.guideId && matchesSearch(r.studentName, searchQuery)
-      )
+      matchesSearch(row.studentName, searchQuery) ||
+      matchesSearch(row.studentRoll, searchQuery) ||
+      (row.sessions || []).some((s: any) => matchesSearch(s.guideName || s.programName || '', searchQuery))
     );
+  });
+
+  // Filter guides' progress list by guide name
+  const filteredGuidesStatus = guidesList.filter((g: any) => {
+    if (!isSearching) return true;
+    return matchesSearch(g.guideName, searchQuery);
   });
 
   const hasAnyResults = filteredRoster.length > 0 || filteredGuidesStatus.length > 0;
@@ -287,8 +289,8 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
         </div>
       </div>
 
-      {/* Search box when more than 8 students: 44px high, 10px radius, red focus outline, visible label for screen readers, no autofocus */}
-      {data.roster.length > 8 && (
+      {/* Search box when more than 8 students */}
+      {roster.length > 8 && (
         <div className="space-y-2">
           <div className="relative">
             <label htmlFor="today-search" className="sr-only">
@@ -349,7 +351,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                 Guides' progress
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                {filteredGuidesStatus.map((g) => (
+                {filteredGuidesStatus.map((g: any) => (
                   <div
                     key={g.guideId}
                     className="p-3 rounded-xl bg-white flex items-center justify-between text-xs"
@@ -357,10 +359,10 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                     <div className="min-w-0 pr-2">
                       <div className="font-bold text-[#111111] truncate">{g.guideName}</div>
                       <div className="text-[#6B7280] text-xs mt-0.5">
-                        {g.markedCount} of {g.menteesCount} marked
+                        {g.markedCount} of {g.sessionsCount ?? g.menteesCount ?? 0} marked
                       </div>
                     </div>
-                    {!g.allMarked && g.menteesCount > 0 ? (
+                    {!g.allMarked && (g.sessionsCount > 0 || g.menteesCount > 0) ? (
                       <button
                         type="button"
                         onClick={() => handleRemindGuide(g.guideId)}
@@ -394,14 +396,32 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
               </div>
             ) : (
               <div className="space-y-2">
-                {filteredRoster.map((row) => {
-                  const isPresent = row.status === 'present';
+                {filteredRoster.map((row: any) => {
+                  const isPresent = row.sessions
+                    ? row.sessions.some((s: any) => s.status === 'present')
+                    : row.status === 'present';
+
+                  const sessionsSummary = row.sessions && row.sessions.length > 0
+                    ? row.sessions
+                        .map(
+                          (s: any) =>
+                            `${s.programName}: ${
+                              s.status === 'present'
+                                ? s.scoreLevel !== null
+                                  ? `Present ${s.scoreLevel}`
+                                  : 'Present'
+                                : 'Absent'
+                            }`
+                        )
+                        .join(' • ')
+                    : 'No sessions';
+
                   return (
                     <div
                       key={row.studentId}
                       className="p-3.5 sm:p-4 rounded-xl bg-[#F3F4F6] flex items-center justify-between gap-2.5 hover:bg-gray-200/60 transition-colors"
                     >
-                      {/* Clean student name & guide */}
+                      {/* Clean student name & program status */}
                       <div
                         onClick={() => onSelectStudent(row.studentId)}
                         className="min-w-0 flex-1 cursor-pointer"
@@ -410,7 +430,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                           {row.studentName}
                         </div>
                         <div className="text-xs text-[#6B7280] truncate mt-0.5">
-                          Guide: {row.guideName}
+                          {sessionsSummary}
                         </div>
                       </div>
 
@@ -429,25 +449,23 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                           </span>
                         )}
 
-                        {/* Numeric score only */}
+                        {/* Numeric score or points */}
                         <div className="text-xs font-semibold min-w-12 text-right shrink-0">
-                          {isPresent ? (
-                            row.points !== null ? (
-                              <span className="text-[#111111]">
-                                {row.points} pts
-                              </span>
-                            ) : (
-                              <span className="text-[#6B7280]">Pending</span>
-                            )
+                          {row.totalPoints !== undefined ? (
+                            <span className="text-[#111111]">
+                              {Number(row.totalPoints).toFixed(1)} pts
+                            </span>
+                          ) : isPresent && row.points !== null ? (
+                            <span className="text-[#111111]">{row.points} pts</span>
                           ) : (
-                            <span className="text-[#6B7280]">0 pts</span>
+                            <span className="text-[#6B7280]">{isPresent ? 'Pending' : '0 pts'}</span>
                           )}
                         </div>
 
                         {/* Streak */}
                         <div className="hidden sm:flex items-center gap-1 text-xs text-[#111111] font-semibold bg-white px-2 py-1 rounded-lg shrink-0">
                           <Flame className="w-3.5 h-3.5 text-[#D4202C]" />
-                          <span>{row.streak}d</span>
+                          <span>{row.streak || 0}d</span>
                         </div>
 
                         {/* Edit button */}
@@ -457,9 +475,9 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                             setEditingStudent({
                               studentId: row.studentId,
                               studentName: row.studentName,
-                              status: row.status,
-                              level: row.level,
-                              note: row.note,
+                              status: isPresent ? 'present' : 'absent',
+                              level: row.sessions?.[0]?.level || row.level || null,
+                              note: row.sessions?.[0]?.note || row.note || '',
                             })
                           }
                           className="p-1.5 sm:p-2 rounded-xl bg-white text-[#111111] hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"

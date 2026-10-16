@@ -1,75 +1,60 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../../api';
-import { supabase } from '../../lib/supabase';
-import { Check, Bell, Flame, MoreVertical, Search, X, Users, AlertCircle, ArrowRight, UserMinus, Trash2 } from 'lucide-react';
+import { Program } from '../../types';
+import { Bell, Check, Search, AlertCircle, RefreshCw, X, BookOpen, Plus, Trash2 } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface AdminGuidesProps {
-  onSelectStudent: (studentId: string) => void;
+  onSelectStudent?: (studentId: string) => void;
   onNotify: (msg: string) => void;
 }
 
-export const AdminGuides: React.FC<AdminGuidesProps> = ({
-  onSelectStudent,
-  onNotify,
-}) => {
-  const [guides, setGuides] = useState<any[]>([]);
-  const [unassignedStudents, setUnassignedStudents] = useState<any[]>([]);
+interface GuideItem {
+  id: string;
+  fullName: string;
+  username: string;
+  programs: Array<{ id: string; name: string; kind: string }>;
+  programsCount: number;
+  sessionsCount: number;
+  markedCount: number;
+  unmarkedCount: number;
+  allMarked: boolean;
+}
+
+export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
+  const [guides, setGuides] = useState<GuideItem[]>([]);
+  const [allPrograms, setAllPrograms] = useState<Program[]>([]);
   const [date, setDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
-  // Active student row dropdown menu
-  const [activeMenuStudentId, setActiveMenuStudentId] = useState<string | null>(null);
+  // Remind cooldown per guide: guideId -> expiry timestamp
+  const [remindCooldowns, setRemindCooldowns] = useState<Record<string, number>>({});
+  const [remindingGuideId, setRemindingGuideId] = useState<string | null>(null);
 
-  // Move / Assign single student modal
-  const [moveStudentTarget, setMoveStudentTarget] = useState<{
-    student: { id: string; fullName: string; username: string };
-    currentGuide: { id: string; fullName: string } | null;
+  // Replace guide tool modal state
+  const [showReplaceModal, setShowReplaceModal] = useState(false);
+  const [guideAId, setGuideAId] = useState<string>('');
+  const [guideBId, setGuideBId] = useState<string>('');
+  const [isReplacing, setIsReplacing] = useState(false);
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+
+  // Remove single program from a guide confirmation modal
+  const [removeProgramTarget, setRemoveProgramTarget] = useState<{
+    guideId: string;
+    guideName: string;
+    programId: string;
+    programName: string;
   } | null>(null);
-  const [selectedTargetGuideId, setSelectedTargetGuideId] = useState<string | null>(null);
-  const [guideSearchQuery, setGuideSearchQuery] = useState('');
-  const [isMoveSubmitting, setIsMoveSubmitting] = useState(false);
-  const [moveError, setMoveError] = useState<string | null>(null);
+  const [isRemovingProgram, setIsRemovingProgram] = useState(false);
+  const [removeProgramError, setRemoveProgramError] = useState<string | null>(null);
 
-  // Remove single student confirmation modal
-  const [removeStudentTarget, setRemoveStudentTarget] = useState<{
-    student: { id: string; fullName: string };
-    guide: { id: string; fullName: string };
-  } | null>(null);
-  const [isRemoveSubmitting, setIsRemoveSubmitting] = useState(false);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-
-  // Transfer all students modal
-  const [transferSourceGuide, setTransferSourceGuide] = useState<any | null>(null);
-  const [transferTargetGuideId, setTransferTargetGuideId] = useState<string | null>(null);
-  const [transferMode, setTransferMode] = useState<'guide' | 'unassign'>('guide');
-  const [transferSearchQuery, setTransferSearchQuery] = useState('');
-  const [isTransferSubmitting, setIsTransferSubmitting] = useState(false);
-  const [transferError, setTransferError] = useState<string | null>(null);
-
-  // Delete person confirmation modal
-  const [deletePersonTarget, setDeletePersonTarget] = useState<{
-    id: string;
-    fullName: string;
-    username?: string;
-    role: 'guide' | 'student';
-    assignedCount?: number;
-  } | null>(null);
-  const [isDeleteSubmitting, setIsDeleteSubmitting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deletedNotice, setDeletedNotice] = useState<string | null>(null);
-
-  // Close dropdown menu when clicking outside
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const handleDocumentClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setActiveMenuStudentId(null);
-      }
-    };
-    document.addEventListener('mousedown', handleDocumentClick);
-    return () => document.removeEventListener('mousedown', handleDocumentClick);
-  }, []);
+  // Assign program to guide modal
+  const [assignProgramTarget, setAssignProgramTarget] = useState<GuideItem | null>(null);
+  const [selectedProgramToAssign, setSelectedProgramToAssign] = useState<string>('');
+  const [isAssigningProgram, setIsAssigningProgram] = useState(false);
+  const [assignProgramError, setAssignProgramError] = useState<string | null>(null);
 
   useEffect(() => {
     loadGuides();
@@ -77,890 +62,627 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({
 
   const loadGuides = async () => {
     setLoading(true);
+    setError(null);
     try {
-      const res = await api.getAdminGuides();
+      const [res, progRes] = await Promise.all([
+        api.getAdminGuides(),
+        api.getAdminPrograms().catch(() => ({ programs: [] })),
+      ]);
       setGuides(res.guides);
       setDate(res.date);
-
-      // Query unassigned students (role = 'student', guide_id is null)
-      const { data: unassigned, error: unassignedErr } = await supabase
-        .from('profiles')
-        .select('id, full_name, username')
-        .eq('role', 'student')
-        .is('guide_id', null)
-        .order('full_name', { ascending: true });
-
-      if (unassignedErr) {
-        console.error('[profiles] error loading unassigned students:', unassignedErr.message || unassignedErr);
-      } else {
-        setUnassignedStudents(
-          (unassigned || []).map((u: any) => ({
-            id: u.id,
-            fullName: u.full_name || u.username,
-            username: u.username,
-          }))
-        );
-      }
-    } catch (_err) {
-      // Graceful error handling
+      setAllPrograms(progRes.programs || []);
+    } catch (err: any) {
+      console.error('[AdminGuides] error loading guides:', err);
+      setError("Couldn't load guides. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRemind = async (guideId: string) => {
+  const handleRemind = async (guideId: string, guideName: string) => {
+    if (remindCooldowns[guideId] && remindCooldowns[guideId] > Date.now()) {
+      return;
+    }
+
+    setRemindingGuideId(guideId);
     try {
-      const res = await api.remindGuide(guideId);
-      onNotify(res.message);
+      await api.remindGuide(guideId);
+      setRemindCooldowns((prev) => ({
+        ...prev,
+        [guideId]: Date.now() + 60 * 1000,
+      }));
+      onNotify(`Reminder sent to ${guideName}.`);
     } catch (err: any) {
-      console.error('[remindGuide] error:', err.message || err);
+      console.error('[remindGuide] error:', err);
+      onNotify("Couldn't send reminder. Try again.");
+    } finally {
+      setRemindingGuideId(null);
     }
   };
 
-  const normalizeText = (text: string): string => {
-    return (text || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/[\u02bb\u02bc\u02bd\u02be\u02bf\u2018\u2019'`ʾʿ]/g, '')
-      .toLowerCase()
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
+  // --- Remove specific program from guide ---
+  const handleExecuteRemoveProgram = async () => {
+    if (!removeProgramTarget) return;
+    setIsRemovingProgram(true);
+    setRemoveProgramError(null);
 
-  const matchesSearch = (text: string, query: string): boolean => {
-    const cleanQuery = normalizeText(query);
-    if (!cleanQuery) return true;
-    return normalizeText(text).includes(cleanQuery);
-  };
-
-  // Execute set_student_guide to move or assign
-  const handleExecuteMove = async () => {
-    if (!moveStudentTarget || !selectedTargetGuideId) return;
-    setIsMoveSubmitting(true);
-    setMoveError(null);
-
-    const targetGuide = guides.find((g) => g.id === selectedTargetGuideId);
-    const targetName = targetGuide ? targetGuide.fullName : 'guide';
-
-    const { error } = await supabase.rpc('set_student_guide', {
-      p_student: moveStudentTarget.student.id,
-      p_guide: selectedTargetGuideId,
-    });
-
-    if (error) {
-      console.error('[set_student_guide] error:', error.message || error);
-      setMoveError(error.message || "Couldn't move student. Try again.");
-      setIsMoveSubmitting(false);
-      return;
-    }
-
-    setIsMoveSubmitting(false);
-    setMoveStudentTarget(null);
-    setSelectedTargetGuideId(null);
-    setGuideSearchQuery('');
-    await loadGuides();
-    onNotify(`Moved ${moveStudentTarget.student.fullName} to ${targetName}.`);
-  };
-
-  // Execute set_student_guide to remove
-  const handleExecuteRemove = async () => {
-    if (!removeStudentTarget) return;
-    setIsRemoveSubmitting(true);
-    setRemoveError(null);
-
-    const { error } = await supabase.rpc('set_student_guide', {
-      p_student: removeStudentTarget.student.id,
-      p_guide: null,
-    });
-
-    if (error) {
-      console.error('[set_student_guide] error:', error.message || error);
-      setRemoveError(error.message || "Couldn't remove student. Try again.");
-      setIsRemoveSubmitting(false);
-      return;
-    }
-
-    setIsRemoveSubmitting(false);
-    const studentName = removeStudentTarget.student.fullName;
-    const guideName = removeStudentTarget.guide.fullName;
-    setRemoveStudentTarget(null);
-    await loadGuides();
-    onNotify(`Removed ${studentName} from ${guideName}.`);
-  };
-
-  // Execute transfer_guide_students
-  const handleExecuteTransfer = async () => {
-    if (!transferSourceGuide) return;
-    setIsTransferSubmitting(true);
-    setTransferError(null);
-
-    const pTo = transferMode === 'guide' ? transferTargetGuideId : null;
-    const targetGuide = transferMode === 'guide' ? guides.find((g) => g.id === transferTargetGuideId) : null;
-
-    const { data: movedCount, error } = await supabase.rpc('transfer_guide_students', {
-      p_from: transferSourceGuide.id,
-      p_to: pTo,
-    });
-
-    if (error) {
-      console.error('[transfer_guide_students] error:', error.message || error);
-      setTransferError(error.message || "Couldn't transfer students. Try again.");
-      setIsTransferSubmitting(false);
-      return;
-    }
-
-    setIsTransferSubmitting(false);
-    const count = typeof movedCount === 'number' ? movedCount : transferSourceGuide.menteesCount;
-    const studentLabel = count === 1 ? '1 student' : `${count} students`;
-    const fromName = transferSourceGuide.fullName;
-
-    setTransferSourceGuide(null);
-    setTransferTargetGuideId(null);
-    setTransferSearchQuery('');
-    await loadGuides();
-
-    if (transferMode === 'guide' && targetGuide) {
-      onNotify(`Moved ${studentLabel} to ${targetGuide.fullName}.`);
-    } else {
-      onNotify(`Removed ${studentLabel} from ${fromName}.`);
-    }
-  };
-
-  const handleDeletePerson = async () => {
-    if (!deletePersonTarget) return;
-    setIsDeleteSubmitting(true);
-    setDeleteError(null);
-
-    const targetName = deletePersonTarget.fullName;
     try {
-      await api.deleteAccount(deletePersonTarget.id);
-      const msg = `${targetName} has been deleted.`;
-      setDeletePersonTarget(null);
-      setIsDeleteSubmitting(false);
-      setDeletedNotice(msg);
-      onNotify(msg);
+      await api.removeProgramGuide(removeProgramTarget.programId, removeProgramTarget.guideId);
+      const { guideName, programName } = removeProgramTarget;
+      setRemoveProgramTarget(null);
       await loadGuides();
+      onNotify(`Removed "${programName}" from ${guideName}.`);
     } catch (err: any) {
-      console.error('[deleteAccount] error:', err.message || err);
-      setDeleteError(err.message || "Couldn't delete. Try again.");
-      setIsDeleteSubmitting(false);
+      console.error('[removeProgramGuide] error:', err);
+      setRemoveProgramError(err.message || "Couldn't remove program from guide. Try again.");
+    } finally {
+      setIsRemovingProgram(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280]">
-        Loading guides overview...
-      </div>
-    );
-  }
+  // --- Assign program to guide ---
+  const handleOpenAssignProgramModal = (guide: GuideItem) => {
+    setAssignProgramTarget(guide);
+    // Find first program not already assigned
+    const assignedIds = new Set(guide.programs.map((p) => p.id));
+    const unassigned = allPrograms.filter((p) => !assignedIds.has(p.id));
+    setSelectedProgramToAssign(unassigned.length > 0 ? unassigned[0].id : '');
+    setAssignProgramError(null);
+  };
+
+  const handleExecuteAssignProgram = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assignProgramTarget || !selectedProgramToAssign) {
+      setAssignProgramError('Please select a program to assign.');
+      return;
+    }
+
+    setIsAssigningProgram(true);
+    setAssignProgramError(null);
+
+    try {
+      await api.addProgramGuide(selectedProgramToAssign, assignProgramTarget.id);
+      const chosenProg = allPrograms.find((p) => p.id === selectedProgramToAssign);
+      const guideName = assignProgramTarget.fullName;
+      setAssignProgramTarget(null);
+      setSelectedProgramToAssign('');
+      await loadGuides();
+      onNotify(`Assigned "${chosenProg?.name || 'Program'}" to ${guideName}.`);
+    } catch (err: any) {
+      console.error('[addProgramGuide] error:', err);
+      setAssignProgramError(err.message || "Couldn't assign program to guide. Try again.");
+    } finally {
+      setIsAssigningProgram(false);
+    }
+  };
+
+  // --- Replace all programs of Guide A with Guide B ---
+  const handleOpenReplaceModal = (initialGuideAId?: string) => {
+    setGuideAId(initialGuideAId || (guides.length > 0 ? guides[0].id : ''));
+    setGuideBId('');
+    setReplaceError(null);
+    setShowReplaceModal(true);
+  };
+
+  const handleExecuteReplaceGuide = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!guideAId || !guideBId) {
+      setReplaceError('Please choose both Guide A and Guide B.');
+      return;
+    }
+    if (guideAId === guideBId) {
+      setReplaceError('Guide A and Guide B must be different persons.');
+      return;
+    }
+
+    const sourceGuide = guides.find((g) => g.id === guideAId);
+    const targetGuide = guides.find((g) => g.id === guideBId);
+
+    setIsReplacing(true);
+    setReplaceError(null);
+
+    try {
+      const results = await api.replaceGuide(guideAId, guideBId);
+      const failed = results.filter((r) => !r.success);
+
+      if (failed.length > 0) {
+        console.error('[replaceGuide] some programs failed:', failed);
+        setReplaceError(`Updated ${results.length - failed.length} programs, but ${failed.length} failed.`);
+      } else {
+        setShowReplaceModal(false);
+        setGuideAId('');
+        setGuideBId('');
+        await loadGuides();
+        onNotify(`Switched all programs from ${sourceGuide?.fullName || 'Guide A'} to ${targetGuide?.fullName || 'Guide B'}.`);
+      }
+    } catch (err: any) {
+      console.error('[replaceGuide] error:', err);
+      setReplaceError(err.message || "Couldn't replace guide. Try again.");
+    } finally {
+      setIsReplacing(false);
+    }
+  };
+
+  const selectedSourceGuide = guides.find((g) => g.id === guideAId);
+  const eligibleTargets = guides.filter((g) => g.id !== guideAId);
+
+  const filteredGuides = guides.filter((g) => {
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return true;
+    const nameMatch = g.fullName.toLowerCase().includes(q) || g.username.toLowerCase().includes(q);
+    const progMatch = (g.programs || []).some((p) => p.name.toLowerCase().includes(q));
+    return nameMatch || progMatch;
+  });
 
   return (
-    <div className="space-y-6 pb-20">
-      <div>
-        <h2 className="font-serif text-[28px] sm:text-[34px] font-normal text-[#111111] leading-tight">
-          Guides
-        </h2>
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+      {/* Title & Actions Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-gray-100 pb-4">
+        <div>
+          <h1 className="font-serif text-2xl sm:text-3xl text-[#111111]">Guides</h1>
+          <p className="text-xs sm:text-sm text-[#6B7280] mt-1">
+            Program supervision and today&apos;s attendance progress {date ? `· ${date}` : ''}
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => handleOpenReplaceModal()}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#D4202C] text-white text-xs sm:text-sm font-semibold hover:bg-[#b01b24] transition-colors cursor-pointer shadow-xs"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Switch all programs</span>
+          </button>
+        </div>
       </div>
 
-      {/* Deleted notification banner */}
-      {deletedNotice && (
-        <div className="p-4 rounded-xl bg-green-50 border border-green-200 text-green-900 text-xs sm:text-sm font-semibold flex items-center justify-between gap-3 shadow-xs">
+      {/* Search Input */}
+      {guides.length > 5 && (
+        <div className="relative">
+          <Search className="w-4 h-4 text-[#6B7280] absolute left-3.5 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search guides or programs..."
+            className="w-full pl-10 pr-4 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs sm:text-sm text-[#111111] placeholder:text-[#9CA3AF] focus:outline-none focus:border-[#D4202C]"
+          />
+        </div>
+      )}
+
+      {/* Error state */}
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-xs text-[#D4202C] flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-green-600 shrink-0"></span>
-            <span>{deletedNotice}</span>
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
           </div>
           <button
             type="button"
-            onClick={() => setDeletedNotice(null)}
-            className="p-1 rounded-md text-green-700 hover:text-green-900 hover:bg-green-100 transition-colors cursor-pointer"
-            title="Dismiss"
+            onClick={loadGuides}
+            className="font-semibold underline hover:no-underline ml-4 cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            Retry
           </button>
         </div>
       )}
 
-      {/* Section: Students without a guide (n) - hidden when empty */}
-      {unassignedStudents.length > 0 && (
-        <div className="p-5 rounded-2xl bg-[#F3F4F6] space-y-3 border border-red-100">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm sm:text-base text-[#111111] flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#D4202C]"></span>
-              Students without a guide ({unassignedStudents.length})
-            </h3>
-          </div>
-          <div className="space-y-2">
-            {unassignedStudents.map((s) => (
-              <div
-                key={s.id}
-                className="p-3 rounded-xl bg-white flex items-center justify-between gap-3 shadow-xs"
-              >
-                <div className="min-w-0">
-                  <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
-                    {s.fullName}
-                  </div>
-                  <div className="text-xs text-[#6B7280]">Roll: {s.username}</div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMoveStudentTarget({
-                        student: s,
-                        currentGuide: null,
-                      });
-                      setSelectedTargetGuideId(null);
-                      setGuideSearchQuery('');
-                      setMoveError(null);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs font-semibold transition-colors cursor-pointer"
-                  >
-                    Assign guide
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeletePersonTarget({
-                        id: s.id,
-                        fullName: s.fullName,
-                        username: s.username,
-                        role: 'student',
-                      });
-                      setDeleteError(null);
-                    }}
-                    className="p-1.5 rounded-xl bg-white border border-[#E5E7EB] hover:bg-red-50 hover:border-red-200 text-[#D4202C] text-xs font-semibold transition-colors cursor-pointer"
-                    title="Delete student"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Loading state */}
+      {loading ? (
+        <div className="p-12 text-center text-xs sm:text-sm text-[#6B7280]">
+          Loading guides and program assignments...
         </div>
-      )}
-
-      {guides.length === 0 ? (
-        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-sm text-[#6B7280] flex flex-col items-center justify-center">
-          <Pentagon size={64} className="mb-3" />
-          <p>No guides configured yet. Create guide accounts in the Accounts tab.</p>
+      ) : filteredGuides.length === 0 ? (
+        <div className="p-8 rounded-2xl bg-[#F3F4F6] text-center text-xs sm:text-sm text-[#6B7280] flex flex-col items-center justify-center">
+          <Pentagon size={56} className="mb-3" />
+          <p>
+            {searchQuery
+              ? 'No guides match your search criteria.'
+              : 'No guides found. Create guide accounts in the Accounts tab.'}
+          </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {guides.map((g) => (
-            <div
-              key={g.id}
-              className="p-5 rounded-2xl bg-[#F3F4F6] space-y-4 relative"
-            >
-              {/* Guide header */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div>
-                  <h3 className="font-bold text-base text-[#111111]">
-                    {g.fullName}
-                  </h3>
-                  <div className="text-xs font-medium text-[#111111] mt-1">
-                    Marked {g.markedCount} of {g.menteesCount} mentees today
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {filteredGuides.map((guide) => {
+            const hasCooldown = Boolean(
+              remindCooldowns[guide.id] && remindCooldowns[guide.id] > Date.now()
+            );
+            const isReminding = remindingGuideId === guide.id;
+
+            return (
+              <div
+                key={guide.id}
+                className="p-5 rounded-2xl bg-[#F3F4F6] border border-gray-100/80 flex flex-col justify-between space-y-4 hover:shadow-xs transition-shadow"
+              >
+                {/* Guide header */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-sm sm:text-base text-[#111111] truncate">
+                        {guide.fullName}
+                      </h3>
+                      <span className="text-xs text-[#6B7280] font-normal">
+                        @{guide.username}
+                      </span>
+                    </div>
+
+                    {/* Progress summary */}
+                    <div className="text-xs text-[#4B5563] mt-1 flex items-center gap-2 flex-wrap">
+                      <span>Sessions today: <strong>{guide.sessionsCount}</strong></span>
+                      <span>·</span>
+                      <span className={guide.allMarked && guide.sessionsCount > 0 ? 'text-green-700 font-semibold' : ''}>
+                        {guide.markedCount} marked
+                      </span>
+                      <span>·</span>
+                      <span className={guide.unmarkedCount > 0 ? 'text-[#D4202C] font-semibold' : ''}>
+                        {guide.unmarkedCount} unmarked
+                      </span>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Transfer all students button */}
-                  {g.menteesCount > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTransferSourceGuide(g);
-                        setTransferTargetGuideId(null);
-                        setTransferMode('guide');
-                        setTransferSearchQuery('');
-                        setTransferError(null);
-                      }}
-                      className="px-3 py-1.5 rounded-xl bg-white border border-[#E5E7EB] hover:bg-gray-100 text-xs font-semibold text-[#111111] transition-colors cursor-pointer"
-                    >
-                      Transfer all students
-                    </button>
-                  )}
-
-                  {!g.allMarked && g.menteesCount > 0 ? (
-                    <button
-                      type="button"
-                      onClick={() => handleRemind(g.id)}
-                      className="px-3 py-1.5 rounded-xl bg-white text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center gap-1.5"
-                    >
-                      <Bell className="w-3.5 h-3.5 text-[#6B7280]" />
-                      <span>Send reminder</span>
-                    </button>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-[#111111]">
-                      <Check className="w-3.5 h-3.5 text-[#D4202C]" />
-                      All marked
-                    </span>
-                  )}
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeletePersonTarget({
-                        id: g.id,
-                        fullName: g.fullName,
-                        role: 'guide',
-                        assignedCount: g.menteesCount,
-                      });
-                      setDeleteError(null);
-                    }}
-                    className="px-3 py-1.5 rounded-xl bg-white border border-[#E5E7EB] hover:bg-red-50 hover:border-red-200 text-xs font-semibold text-[#D4202C] transition-colors cursor-pointer flex items-center gap-1.5"
-                    title="Delete guide"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Mentees list under this guide */}
-              <div className="space-y-2 pt-1 border-t border-gray-200">
-                <span className="text-xs font-semibold text-[#6B7280] block mb-2">
-                  Assigned mentees ({g.mentees.length}):
-                </span>
-                {g.mentees.length === 0 ? (
-                  <div className="text-xs text-[#6B7280] p-2 bg-white rounded-xl">
-                    No students currently assigned to this guide.
-                  </div>
-                ) : (
-                  g.mentees.map((m: any) => {
-                    const isPresent = m.attendance?.status === 'present';
-                    const isMenuOpen = activeMenuStudentId === m.id;
-
-                    return (
-                      <div
-                        key={m.id}
-                        onClick={() => onSelectStudent(m.id)}
-                        className="p-3 rounded-xl bg-white flex items-center justify-between gap-3 cursor-pointer hover:bg-gray-50 transition-colors relative"
+                  {/* Status chip / Remind button */}
+                  <div className="shrink-0 flex items-center gap-2">
+                    {guide.allMarked && guide.sessionsCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-green-700 border border-green-200">
+                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                        <span>All marked</span>
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleRemind(guide.id, guide.fullName)}
+                        disabled={hasCooldown || isReminding}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                          hasCooldown
+                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                            : 'bg-white text-[#111111] hover:bg-gray-100 border border-[#E5E7EB]'
+                        }`}
+                        title="Send attendance reminder"
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
-                            {m.fullName}
-                          </div>
-                          {m.programs.length > 0 && (
-                            <div className="text-xs text-[#6B7280] truncate mt-0.5">
-                              {m.programs.join(', ')}
-                            </div>
-                          )}
-                        </div>
+                        <Bell className="w-3.5 h-3.5 text-[#D4202C]" />
+                        <span>{hasCooldown ? 'Sent' : isReminding ? 'Sending...' : 'Remind'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
 
-                        <div className="flex items-center gap-2 shrink-0">
-                          {isPresent ? (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#D4202C] text-white text-xs font-semibold">
-                              <Check className="w-3.5 h-3.5 stroke-[3]" />
-                              Present
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#F3F4F6] text-[#6B7280] text-xs font-semibold">
-                              <span>-</span>
-                              Absent
-                            </span>
-                          )}
-
-                          <div className="text-xs font-semibold text-[#111111] min-w-12 text-right">
-                            {isPresent
-                              ? m.attendance?.points !== null
-                                ? `${m.attendance?.points} pts`
-                                : 'Pending'
-                              : '0 pts'}
-                          </div>
-
-                          <div className="flex items-center gap-0.5 text-xs text-[#111111] font-semibold bg-[#F3F4F6] px-2 py-0.5 rounded-lg">
-                            <Flame className="w-3.5 h-3.5 text-[#D4202C]" />
-                            <span>{m.streak}d</span>
-                          </div>
-
-                          {/* "..." menu button */}
-                          <div
-                            className="relative"
-                            onClick={(e) => e.stopPropagation()}
-                            ref={isMenuOpen ? menuRef : null}
-                          >
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setActiveMenuStudentId(isMenuOpen ? null : m.id);
-                              }}
-                              className="p-1.5 rounded-lg hover:bg-gray-100 text-[#6B7280] hover:text-[#111111] transition-colors"
-                              title="Student actions"
-                              aria-label="Student actions"
-                            >
-                              <MoreVertical className="w-4 h-4" />
-                            </button>
-
-                            {/* Dropdown Menu */}
-                            {isMenuOpen && (
-                              <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-lg border border-gray-100 py-1 z-30 text-left">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuStudentId(null);
-                                    setMoveStudentTarget({
-                                      student: { id: m.id, fullName: m.fullName, username: m.username },
-                                      currentGuide: { id: g.id, fullName: g.fullName },
-                                    });
-                                    setSelectedTargetGuideId(null);
-                                    setGuideSearchQuery('');
-                                    setMoveError(null);
-                                  }}
-                                  className="w-full px-3.5 py-2 text-xs font-semibold text-[#111111] hover:bg-gray-50 flex items-center gap-2"
-                                >
-                                  <ArrowRight className="w-3.5 h-3.5 text-[#6B7280]" />
-                                  <span>Move to another guide</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuStudentId(null);
-                                    setRemoveStudentTarget({
-                                      student: { id: m.id, fullName: m.fullName },
-                                      guide: { id: g.id, fullName: g.fullName },
-                                    });
-                                    setRemoveError(null);
-                                  }}
-                                  className="w-full px-3.5 py-2 text-xs font-semibold text-[#D4202C] hover:bg-red-50 flex items-center gap-2"
-                                >
-                                  <UserMinus className="w-3.5 h-3.5" />
-                                  <span>Remove from this guide</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setActiveMenuStudentId(null);
-                                    setDeletePersonTarget({
-                                      id: m.id,
-                                      fullName: m.fullName,
-                                      username: m.username,
-                                      role: 'student',
-                                    });
-                                    setDeleteError(null);
-                                  }}
-                                  className="w-full px-3.5 py-2 text-xs font-semibold text-[#D4202C] hover:bg-red-50 flex items-center gap-2 border-t border-gray-100"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  <span>Delete student</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Guide Picker / Move Modal */}
-      {moveStudentTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base text-[#111111]">
-                  {moveStudentTarget.currentGuide ? 'Move to another guide' : 'Assign guide'}
-                </h3>
-                <p className="text-xs text-[#6B7280]">
-                  {moveStudentTarget.student.fullName} ({moveStudentTarget.student.username})
-                  {moveStudentTarget.currentGuide && ` • Current: ${moveStudentTarget.currentGuide.fullName}`}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setMoveStudentTarget(null)}
-                className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {moveError && (
-              <div className="mx-4 mt-3 p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{moveError}</span>
-              </div>
-            )}
-
-            {/* Search box */}
-            <div className="p-4 pb-2">
-              <div className="relative">
-                <label htmlFor="modal-guide-search" className="sr-only">
-                  Search guides
-                </label>
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
-                <input
-                  id="modal-guide-search"
-                  type="text"
-                  value={guideSearchQuery}
-                  onChange={(e) => setGuideSearchQuery(e.target.value)}
-                  placeholder="Search guides by name or username"
-                  className="w-full h-[44px] pl-9 pr-9 rounded-[10px] bg-[#F3F4F6] text-xs sm:text-sm text-[#111111] placeholder:text-[#6B7280] border border-transparent focus:border-[#D4202C] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#D4202C]/20"
-                />
-                {guideSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setGuideSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6B7280] hover:text-[#111111]"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Guides List */}
-            <div className="px-4 py-2 overflow-y-auto flex-1 space-y-2">
-              {guides
-                .filter((g) => {
-                  if (moveStudentTarget.currentGuide && g.id === moveStudentTarget.currentGuide.id) {
-                    return false;
-                  }
-                  if (!guideSearchQuery.trim()) return true;
-                  return (
-                    matchesSearch(g.fullName, guideSearchQuery) ||
-                    matchesSearch(g.username, guideSearchQuery)
-                  );
-                })
-                .map((g) => {
-                  const isSelected = selectedTargetGuideId === g.id;
-                  return (
-                    <div
-                      key={g.id}
-                      onClick={() => setSelectedTargetGuideId(g.id)}
-                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-[#D4202C] bg-red-50/40 shadow-xs'
-                          : 'border-gray-200 bg-white hover:bg-gray-50'
-                      }`}
+                {/* Programs list */}
+                <div className="pt-2 border-t border-gray-200/60">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-semibold text-[#6B7280]">
+                      Programs guided ({guide.programs.length}):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAssignProgramModal(guide)}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-[#D4202C] hover:text-[#b01b24] cursor-pointer transition-colors"
+                      title={`Assign a program to ${guide.fullName}`}
                     >
-                      <div className="min-w-0">
-                        <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
-                          {g.fullName}
-                        </div>
-                        <div className="text-xs text-[#6B7280]">
-                          Roll: {g.username}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#111111]">
-                          {g.menteesCount} {g.menteesCount === 1 ? 'student' : 'students'}
-                        </span>
-                        <div
-                          className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            isSelected ? 'border-[#D4202C] bg-[#D4202C]' : 'border-gray-300'
-                          }`}
-                        >
-                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                        </div>
-                      </div>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Assign program</span>
+                    </button>
+                  </div>
+
+                  {guide.programs.length === 0 ? (
+                    <div className="text-xs text-[#6B7280] italic py-1">
+                      No programs assigned yet. Click &quot;Assign program&quot; above to add one.
                     </div>
-                  );
-                })}
-            </div>
-
-            <div className="p-4 border-t border-[#F3F4F6] flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setMoveStudentTarget(null)}
-                className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteMove}
-                disabled={!selectedTargetGuideId || isMoveSubmitting}
-                className="h-[44px] px-5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
-              >
-                {isMoveSubmitting ? 'Moving...' : moveStudentTarget.currentGuide ? 'Move' : 'Assign'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Remove Single Student Confirmation Modal */}
-      {removeStudentTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-xl p-5 space-y-4">
-            <h3 className="font-bold text-base text-[#111111]">
-              Remove from guide
-            </h3>
-            <p className="text-xs sm:text-sm text-[#111111] leading-relaxed">
-              Remove {removeStudentTarget.student.fullName} from {removeStudentTarget.guide.fullName}'s list? {removeStudentTarget.guide.fullName} will no longer see this student. Open tasks stay with {removeStudentTarget.guide.fullName}.
-            </p>
-
-            {removeError && (
-              <div className="p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{removeError}</span>
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setRemoveStudentTarget(null)}
-                className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteRemove}
-                disabled={isRemoveSubmitting}
-                className="px-4 py-2 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
-              >
-                {isRemoveSubmitting ? 'Removing...' : 'Remove'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Transfer All Students Modal */}
-      {transferSourceGuide && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md shadow-xl overflow-hidden flex flex-col max-h-[85vh]">
-            <div className="p-4 border-b border-[#F3F4F6] flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-base text-[#111111]">
-                  Transfer all students
-                </h3>
-                <p className="text-xs text-[#6B7280]">
-                  From {transferSourceGuide.fullName} ({transferSourceGuide.menteesCount} {transferSourceGuide.menteesCount === 1 ? 'student' : 'students'})
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setTransferSourceGuide(null)}
-                className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111]"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            {transferError && (
-              <div className="mx-4 mt-3 p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{transferError}</span>
-              </div>
-            )}
-
-            <div className="p-4 space-y-3">
-              {/* Option switch: Move to another guide vs Remove all */}
-              <div className="flex bg-[#F3F4F6] p-1 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setTransferMode('guide')}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    transferMode === 'guide' ? 'bg-white text-[#111111] shadow-xs' : 'text-[#6B7280]'
-                  }`}
-                >
-                  Choose another guide
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTransferMode('unassign');
-                    setTransferTargetGuideId(null);
-                  }}
-                  className={`flex-1 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                    transferMode === 'unassign' ? 'bg-white text-[#D4202C] shadow-xs' : 'text-[#6B7280]'
-                  }`}
-                >
-                  Remove all (leave unassigned)
-                </button>
-              </div>
-
-              {transferMode === 'guide' ? (
-                <>
-                  <div className="relative">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
-                    <input
-                      type="text"
-                      value={transferSearchQuery}
-                      onChange={(e) => setTransferSearchQuery(e.target.value)}
-                      placeholder="Search guides"
-                      className="w-full h-[44px] pl-9 pr-9 rounded-[10px] bg-[#F3F4F6] text-xs text-[#111111] placeholder:text-[#6B7280] border border-transparent focus:border-[#D4202C] focus:bg-white focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="max-h-56 overflow-y-auto space-y-2">
-                    {guides
-                      .filter((g) => g.id !== transferSourceGuide.id)
-                      .filter((g) => {
-                        if (!transferSearchQuery.trim()) return true;
-                        return (
-                          matchesSearch(g.fullName, transferSearchQuery) ||
-                          matchesSearch(g.username, transferSearchQuery)
-                        );
-                      })
-                      .map((g) => {
-                        const isSelected = transferTargetGuideId === g.id;
-                        return (
-                          <div
-                            key={g.id}
-                            onClick={() => setTransferTargetGuideId(g.id)}
-                            className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
-                              isSelected
-                                ? 'border-[#D4202C] bg-red-50/40'
-                                : 'border-gray-200 bg-white hover:bg-gray-50'
-                            }`}
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {guide.programs.map((prog) => (
+                        <span
+                          key={prog.id}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium pl-2.5 pr-1.5 py-1 rounded-lg bg-white text-[#111111] border border-gray-200 shadow-2xs hover:border-red-200 transition-colors group"
+                        >
+                          <BookOpen className="w-3 h-3 text-[#D4202C] shrink-0" />
+                          <span>{prog.name}</span>
+                          <span className="text-[11px] text-[#6B7280] font-normal uppercase">
+                            ({prog.kind})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRemoveProgramTarget({
+                                guideId: guide.id,
+                                guideName: guide.fullName,
+                                programId: prog.id,
+                                programName: prog.name,
+                              });
+                              setRemoveProgramError(null);
+                            }}
+                            className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-[#D4202C] transition-colors ml-0.5 cursor-pointer"
+                            title={`Remove ${prog.name} from ${guide.fullName}`}
+                            aria-label={`Remove ${prog.name} from ${guide.fullName}`}
                           >
-                            <div className="min-w-0">
-                              <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
-                                {g.fullName}
-                              </div>
-                              <div className="text-xs text-[#6B7280]">Roll: {g.username}</div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#111111]">
-                                {g.menteesCount} {g.menteesCount === 1 ? 'student' : 'students'}
-                              </span>
-                              <div
-                                className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                                  isSelected ? 'border-[#D4202C] bg-[#D4202C]' : 'border-gray-300'
-                                }`}
-                              >
-                                {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-
-                  {transferTargetGuideId && (
-                    <div className="p-3 rounded-xl bg-[#F3F4F6] text-xs text-[#111111]">
-                      Move {transferSourceGuide.menteesCount}{' '}
-                      {transferSourceGuide.menteesCount === 1 ? 'student' : 'students'} to{' '}
-                      <strong>
-                        {guides.find((g) => g.id === transferTargetGuideId)?.fullName}
-                      </strong>
-                      ? Their open tasks will move with them.
+                            <X className="w-3.5 h-3.5 stroke-[2.5]" />
+                          </button>
+                        </span>
+                      ))}
                     </div>
                   )}
-                </>
-              ) : (
-                <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-xs text-[#111111] leading-relaxed">
-                  Remove all {transferSourceGuide.menteesCount}{' '}
-                  {transferSourceGuide.menteesCount === 1 ? 'student' : 'students'} from{' '}
-                  <strong>{transferSourceGuide.fullName}</strong>'s list? {transferSourceGuide.fullName}{' '}
-                  will no longer see these students. Open tasks stay with {transferSourceGuide.fullName}.
                 </div>
-              )}
-            </div>
 
-            <div className="p-4 border-t border-[#F3F4F6] flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setTransferSourceGuide(null)}
-                className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteTransfer}
-                disabled={
-                  isTransferSubmitting ||
-                  (transferMode === 'guide' && !transferTargetGuideId)
-                }
-                className="h-[44px] px-5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
-              >
-                {isTransferSubmitting
-                  ? 'Transferring...'
-                  : transferMode === 'guide'
-                  ? 'Transfer'
-                  : 'Remove all'}
-              </button>
-            </div>
-          </div>
+                {/* Card footer: quick replace link */}
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReplaceModal(guide.id)}
+                    className="text-xs text-[#6B7280] hover:text-[#D4202C] font-semibold transition-colors cursor-pointer"
+                  >
+                    Switch programs to another guide →
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
-      {deletePersonTarget && (
-        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl p-6 space-y-4">
-            <div className="flex items-start justify-between">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center text-[#D4202C] shrink-0">
+      {/* --- MODAL 1: Remove Specific Program Confirmation Modal --- */}
+      {removeProgramTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4 animate-in fade-in duration-150">
+            <div className="flex items-start justify-between gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-50 text-[#D4202C] flex items-center justify-center shrink-0">
                 <Trash2 className="w-5 h-5" />
               </div>
               <button
                 type="button"
-                disabled={isDeleteSubmitting}
-                onClick={() => {
-                  setDeletePersonTarget(null);
-                  setDeleteError(null);
-                }}
-                className="p-1 rounded-lg text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
-                aria-label="Close"
+                onClick={() => setRemoveProgramTarget(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div>
-              <h3 className="font-bold text-lg text-[#111111]">
-                Delete {deletePersonTarget.role === 'guide' ? 'Guide' : 'Student'}?
-              </h3>
+              <h2 className="font-bold text-base sm:text-lg text-[#111111]">
+                Remove program from guide
+              </h2>
               <p className="text-xs sm:text-sm text-[#6B7280] mt-1.5 leading-relaxed">
-                Are you sure you want to delete <strong className="text-[#111111]">{deletePersonTarget.fullName}</strong>
-                {deletePersonTarget.username ? ` (${deletePersonTarget.username})` : ''}?
-                {deletePersonTarget.role === 'guide'
-                  ? ` Any students (${deletePersonTarget.assignedCount || 0}) assigned to this guide will become unassigned. This action cannot be undone.`
-                  : ' All attendance records, submitted tasks, and program enrollments for this student will be permanently deleted. This action cannot be undone.'}
+                Are you sure you want to remove <strong className="text-[#111111]">{removeProgramTarget.programName}</strong> from <strong className="text-[#111111]">{removeProgramTarget.guideName}</strong>?
+              </p>
+              <p className="text-xs text-[#6B7280] mt-1">
+                This mentor will no longer guide or mark attendance for this program.
               </p>
             </div>
 
-            {deleteError && (
-              <div className="p-3 rounded-xl bg-red-50 text-xs font-semibold text-[#D4202C] flex items-center gap-2">
+            {removeProgramError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-xs text-[#D4202C] flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{deleteError}</span>
+                <span>{removeProgramError}</span>
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2.5 pt-2">
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
               <button
                 type="button"
-                disabled={isDeleteSubmitting}
-                onClick={() => {
-                  setDeletePersonTarget(null);
-                  setDeleteError(null);
-                }}
-                className="px-4 py-2.5 rounded-[10px] text-xs sm:text-sm font-semibold text-[#6B7280] hover:bg-gray-100 transition-colors cursor-pointer disabled:opacity-50"
+                onClick={() => setRemoveProgramTarget(null)}
+                disabled={isRemovingProgram}
+                className="px-4 py-2 text-xs font-semibold text-[#6B7280] hover:text-[#111111] rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleDeletePerson}
-                disabled={isDeleteSubmitting}
-                className="px-5 py-2.5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs sm:text-sm font-semibold cursor-pointer disabled:opacity-50 flex items-center gap-2 transition-colors"
+                onClick={handleExecuteRemoveProgram}
+                disabled={isRemovingProgram}
+                className="px-4 py-2 text-xs font-semibold bg-[#D4202C] text-white rounded-xl hover:bg-[#b01b24] transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5 shadow-xs"
               >
-                {isDeleteSubmitting ? 'Deleting...' : 'Delete'}
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isRemovingProgram ? 'Removing...' : 'Remove program'}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL 2: Assign Program to Guide Modal --- */}
+      {assignProgramTarget && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-gray-100 space-y-4 animate-in fade-in duration-150">
+            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
+              <div>
+                <h2 className="font-bold text-base sm:text-lg text-[#111111]">
+                  Assign program
+                </h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">
+                  Assign a program to <strong className="text-[#111111]">{assignProgramTarget.fullName}</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssignProgramTarget(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {assignProgramError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-xs text-[#D4202C] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{assignProgramError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteAssignProgram} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-[#111111] mb-1">
+                  Select program
+                </label>
+                {(() => {
+                  const assignedIds = new Set(assignProgramTarget.programs.map((p) => p.id));
+                  const available = allPrograms.filter((p) => !assignedIds.has(p.id));
+
+                  if (available.length === 0) {
+                    return (
+                      <p className="text-xs text-gray-500 italic p-3 bg-gray-50 rounded-xl">
+                        This guide is already assigned to all configured programs.
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <select
+                      value={selectedProgramToAssign}
+                      onChange={(e) => setSelectedProgramToAssign(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs sm:text-sm text-[#111111] focus:outline-none focus:border-[#D4202C]"
+                      required
+                    >
+                      <option value="" disabled>Select a program</option>
+                      {available.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.kind})
+                        </option>
+                      ))}
+                    </select>
+                  );
+                })()}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setAssignProgramTarget(null)}
+                  disabled={isAssigningProgram}
+                  className="px-4 py-2 text-xs font-semibold text-[#6B7280] hover:text-[#111111] rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isAssigningProgram || !selectedProgramToAssign}
+                  className="px-4 py-2 text-xs font-semibold bg-[#D4202C] text-white rounded-xl hover:bg-[#b01b24] transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5 shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isAssigningProgram ? 'Assigning...' : 'Assign program'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL 3: Replace Guide across all programs --- */}
+      {showReplaceModal && (
+        <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-100 space-y-5 animate-in fade-in duration-150">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
+              <div>
+                <h2 className="font-bold text-base sm:text-lg text-[#111111]">
+                  Switch all programs to another guide
+                </h2>
+                <p className="text-xs text-[#6B7280] mt-0.5">
+                  Switches all program assignments of Guide A to Guide B across every program.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReplaceModal(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {replaceError && (
+              <div className="p-3 rounded-xl bg-red-50 border border-red-100 text-xs text-[#D4202C] flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{replaceError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleExecuteReplaceGuide} className="space-y-4">
+              {/* Guide A (Current) */}
+              <div>
+                <label className="block text-xs font-bold text-[#111111] mb-1">
+                  Guide A (current guide)
+                </label>
+                <select
+                  value={guideAId}
+                  onChange={(e) => {
+                    setGuideAId(e.target.value);
+                    if (guideBId === e.target.value) setGuideBId('');
+                  }}
+                  className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs sm:text-sm text-[#111111] focus:outline-none focus:border-[#D4202C]"
+                  required
+                >
+                  <option value="" disabled>Select current guide</option>
+                  {guides.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.fullName} ({g.programs.length} programs)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Programs affected preview */}
+              {selectedSourceGuide && (
+                <div className="p-3 rounded-xl bg-[#F3F4F6] text-xs text-[#111111] space-y-1">
+                  <div className="font-semibold text-[#6B7280]">
+                    Programs currently guided by {selectedSourceGuide.fullName} ({selectedSourceGuide.programs.length}):
+                  </div>
+                  {selectedSourceGuide.programs.length === 0 ? (
+                    <div className="text-gray-500 italic">No programs currently assigned.</div>
+                  ) : (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {selectedSourceGuide.programs.map((p) => (
+                        <span key={p.id} className="px-2 py-0.5 bg-white rounded text-[11px] font-medium border border-gray-200">
+                          {p.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Guide B (Replacement) */}
+              <div>
+                <label className="block text-xs font-bold text-[#111111] mb-1">
+                  Guide B (replacement guide)
+                </label>
+                <select
+                  value={guideBId}
+                  onChange={(e) => setGuideBId(e.target.value)}
+                  className="w-full px-3 py-2 bg-white border border-[#E5E7EB] rounded-xl text-xs sm:text-sm text-[#111111] focus:outline-none focus:border-[#D4202C]"
+                  required
+                >
+                  <option value="" disabled>Select replacement guide</option>
+                  {eligibleTargets.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.fullName} ({g.programs.length} programs)
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
+                <button
+                  type="button"
+                  onClick={() => setShowReplaceModal(false)}
+                  disabled={isReplacing}
+                  className="px-4 py-2 text-xs font-semibold text-[#6B7280] hover:text-[#111111] rounded-xl hover:bg-gray-100 transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isReplacing || !guideAId || !guideBId}
+                  className="px-4 py-2 text-xs font-semibold bg-[#D4202C] text-white rounded-xl hover:bg-[#b01b24] transition-colors disabled:opacity-50 cursor-pointer flex items-center gap-1.5 shadow-xs"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isReplacing ? 'animate-spin' : ''}`} />
+                  <span>{isReplacing ? 'Switching...' : 'Switch programs'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
     </div>
   );
 };
-

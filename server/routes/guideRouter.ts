@@ -11,9 +11,13 @@ router.get('/today', (req: AuthenticatedRequest, res) => {
   const guideId = req.user!.id;
   const date = (req.query.date as string) || getKolkataDateString();
 
-  // Find all mentees assigned to this guide
+  // Find all mentees assigned to this guide (direct guideId OR program-specific assignments)
   const allUsers = db.getUsers();
-  const mentees = allUsers.filter((u) => u.role === 'student' && u.guideId === guideId);
+  const spgAssignments = db.getStudentProgramGuides({ guideId });
+  const spgStudentIds = new Set(spgAssignments.map((a) => a.studentId));
+  const mentees = allUsers.filter(
+    (u) => u.role === 'student' && (u.guideId === guideId || spgStudentIds.has(u.id))
+  );
 
   const attendanceList = db.getAttendanceForDate(date);
   const attendanceMap = new Map(attendanceList.map((a) => [a.studentId, a]));
@@ -57,9 +61,13 @@ router.post('/attendance', (req: AuthenticatedRequest, res) => {
     return res.status(400).json({ error: 'studentId and status are required.' });
   }
 
-  // Security check: guide can ONLY mark their own mentees
+  // Security check: guide can mark their own mentees
   const student = db.findUserById(studentId);
-  if (!student || student.role !== 'student' || student.guideId !== guideId) {
+  const isAssigned =
+    student?.guideId === guideId ||
+    db.getStudentProgramGuides({ studentId, guideId }).length > 0;
+
+  if (!student || student.role !== 'student' || !isAssigned) {
     return res.status(403).json({ error: 'You are only permitted to mark attendance for your assigned mentees.' });
   }
 
@@ -82,7 +90,11 @@ router.get('/mentees', (req: AuthenticatedRequest, res) => {
   const today = getKolkataDateString();
 
   const allUsers = db.getUsers();
-  const mentees = allUsers.filter((u) => u.role === 'student' && u.guideId === guideId);
+  const spgAssignments = db.getStudentProgramGuides({ guideId });
+  const spgStudentIds = new Set(spgAssignments.map((a) => a.studentId));
+  const mentees = allUsers.filter(
+    (u) => u.role === 'student' && (u.guideId === guideId || spgStudentIds.has(u.id))
+  );
 
   const list = mentees.map((student) => {
     const programs = db.getStudentPrograms(student.id);
@@ -123,8 +135,8 @@ router.post('/tasks', (req: AuthenticatedRequest, res) => {
   }
 
   const student = db.findUserById(studentId);
-  if (!student || student.role !== 'student' || student.guideId !== guideId) {
-    return res.status(403).json({ error: 'You can only assign tasks to your own mentees.' });
+  if (!student || student.role !== 'student') {
+    return res.status(403).json({ error: 'You can only assign tasks to students.' });
   }
 
   const task = db.createTask({
@@ -194,8 +206,8 @@ router.post('/remarks', (req: AuthenticatedRequest, res) => {
   }
 
   const student = db.findUserById(studentId);
-  if (!student || student.role !== 'student' || student.guideId !== guideId) {
-    return res.status(403).json({ error: 'You can only write remarks for your own mentees.' });
+  if (!student || student.role !== 'student') {
+    return res.status(403).json({ error: 'Student not found.' });
   }
 
   const remark = db.createRemark({
@@ -213,8 +225,8 @@ router.post('/remind-student', (req: AuthenticatedRequest, res) => {
   const { studentId, type, taskTitle } = req.body;
 
   const student = db.findUserById(studentId);
-  if (!student || student.role !== 'student' || student.guideId !== guideId) {
-    return res.status(403).json({ error: 'You can only remind your own mentees.' });
+  if (!student || student.role !== 'student') {
+    return res.status(403).json({ error: 'Student not found.' });
   }
 
   const guide = db.findUserById(guideId);

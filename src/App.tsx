@@ -221,6 +221,8 @@ export default function App() {
           attendanceHistory={studentHomeData?.attendanceHistory || []}
           remarks={studentHomeData?.remarks || []}
           programs={studentHomeData?.programs || []}
+          programGuides={studentHomeData?.programGuides || []}
+          allGuides={studentHomeData?.allGuides || []}
           hasUploadedScreenshotToday={studentHomeData?.hasUploadedScreenshotToday || false}
           onRefresh={() => {
             loadStudentHomeData();

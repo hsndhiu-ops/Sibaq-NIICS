@@ -37,7 +37,9 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
   const [data, setData] = useState<{
     student: User;
     guide: { id: string; fullName: string; username: string } | null;
-    programs: Program[];
+    allGuides?: Array<{ id: string; fullName: string; username: string; email?: string; programs: string[] }>;
+    programGuides?: Array<{ id: string; programId: string; programName: string; guideId: string; guideName: string; guideUsername: string; guideEmail?: string; assignedAt: string }>;
+    programs: any[];
     streak: number;
     totalPoints: number;
     attendanceHistory: AttendanceRecord[];
@@ -109,11 +111,14 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
     Array<{ id: string; fullName: string; username: string; studentCount: number }>
   >([]);
   const [isChangingGuide, setIsChangingGuide] = useState(false);
-  const [selectedGuideId, setSelectedGuideId] = useState<string | null>(null);
+  const [selectedGuideIds, setSelectedGuideIds] = useState<string[]>([]);
+  const [selectedProgramId, setSelectedProgramId] = useState<string>('general');
+  const [assignMode, setAssignMode] = useState<'add' | 'replace'>('add');
   const [guideSearchQuery, setGuideSearchQuery] = useState('');
   const [isGuideSubmitting, setIsGuideSubmitting] = useState(false);
   const [guideModalError, setGuideModalError] = useState<string | null>(null);
   const [showRemoveConfirm, setShowRemoveConfirm] = useState(false);
+  const [removeTargetGuideId, setRemoveTargetGuideId] = useState<string | null>(null);
   const [actionNotification, setActionNotification] = useState<string | null>(null);
 
   // Delete student confirmation state
@@ -131,7 +136,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
       await api.deleteAccount(data.student.id);
       setIsDeletingStudent(false);
       setShowDeleteConfirm(false);
-      onNotify?.(`${studentName} has been deleted.`);
+      onNotify?.(`${studentName} has been deleted!`);
       onClose();
     } catch (err: any) {
       console.error('[deleteAccount] error:', err.message || err);
@@ -148,7 +153,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
     try {
       const { data: allProfiles, error } = await supabase
         .from('profiles')
-        .select('id, full_name, username, role, guide_id')
+        .select('id, full_name, username, role')
         .order('full_name', { ascending: true });
 
       if (error) {
@@ -157,20 +162,13 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
       }
 
       const guideList = (allProfiles || []).filter((p) => p.role === 'guide');
-      const students = (allProfiles || []).filter((p) => p.role === 'student');
-      const counts = new Map<string, number>();
-      students.forEach((s) => {
-        if (s.guide_id) {
-          counts.set(s.guide_id, (counts.get(s.guide_id) || 0) + 1);
-        }
-      });
 
       setAvailableGuides(
         guideList.map((g) => ({
           id: g.id,
           fullName: g.full_name || g.username,
           username: g.username,
-          studentCount: counts.get(g.id) || 0,
+          studentCount: 0,
         }))
       );
     } catch (err: any) {
@@ -208,57 +206,50 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
   };
 
   const handleExecuteChangeGuide = async () => {
-    if (!data || !selectedGuideId) return;
+    if (!data || selectedGuideIds.length === 0) return;
     setIsGuideSubmitting(true);
     setGuideModalError(null);
 
-    const targetGuide = availableGuides.find((g) => g.id === selectedGuideId);
-    const targetName = targetGuide ? targetGuide.fullName : 'guide';
-
-    const { error } = await supabase.rpc('set_student_guide', {
-      p_student: data.student.id,
-      p_guide: selectedGuideId,
-    });
-
-    if (error) {
-      console.error('[set_student_guide] error:', error.message || error);
-      setGuideModalError(error.message || "Couldn't assign guide. Try again.");
+    try {
+      const res = await api.assignStudentGuides(
+        data.student.id,
+        selectedGuideIds,
+        selectedProgramId,
+        assignMode
+      );
       setIsGuideSubmitting(false);
-      return;
+      setIsChangingGuide(false);
+      setActionNotification(res.message || `Updated guide assignments for ${data.student.fullName}.`);
+      await loadStudentDetail();
+      onNotify?.(res.message || `Updated guide assignments for ${data.student.fullName}.`);
+    } catch (err: any) {
+      console.error('[assignStudentGuides] error:', err);
+      setGuideModalError(err.message || "Couldn't assign guides. Try again.");
+      setIsGuideSubmitting(false);
     }
-
-    setIsGuideSubmitting(false);
-    setIsChangingGuide(false);
-    setSelectedGuideId(null);
-    setGuideSearchQuery('');
-    setActionNotification(`Moved ${data.student.fullName} to ${targetName}.`);
-    await loadStudentDetail();
   };
 
-  const handleExecuteRemoveGuide = async () => {
-    if (!data || !data.guide) return;
+  const handleExecuteRemoveGuide = async (guideIdToRemove?: string) => {
+    if (!data) return;
+    const gId = guideIdToRemove || removeTargetGuideId || (data.guide ? data.guide.id : null);
+    if (!gId) return;
     setIsGuideSubmitting(true);
     setGuideModalError(null);
 
-    const oldGuideName = data.guide.fullName;
-
-    const { error } = await supabase.rpc('set_student_guide', {
-      p_student: data.student.id,
-      p_guide: null,
-    });
-
-    if (error) {
-      console.error('[set_student_guide] error:', error.message || error);
-      setGuideModalError(error.message || "Couldn't remove student. Try again.");
+    try {
+      const res = await api.removeStudentGuide(data.student.id, gId, selectedProgramId || 'general');
       setIsGuideSubmitting(false);
-      return;
+      setShowRemoveConfirm(false);
+      setRemoveTargetGuideId(null);
+      setSelectedGuideIds((prev) => prev.filter((id) => id !== gId));
+      setActionNotification(res.message || 'Removed guide assignment.');
+      await loadStudentDetail();
+      onNotify?.(res.message || 'Removed guide assignment.');
+    } catch (err: any) {
+      console.error('[removeStudentGuide] error:', err);
+      setGuideModalError(err.message || "Couldn't remove guide. Try again.");
+      setIsGuideSubmitting(false);
     }
-
-    setIsGuideSubmitting(false);
-    setIsChangingGuide(false);
-    setShowRemoveConfirm(false);
-    setActionNotification(`Removed ${data.student.fullName} from ${oldGuideName}.`);
-    await loadStudentDetail();
   };
 
   const handleAdminReviewSubmit = async (e: React.FormEvent) => {
@@ -312,7 +303,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
   } = data;
 
   const assignedTasks = tasks.filter((t) => t.status === 'assigned');
-  const awaitingReviewTasks = tasks.filter((t) => t.status === 'awaiting_review');
+  const awaitingReviewTasks = tasks.filter((t) => t.status === 'submitted');
   const completedTasks = tasks.filter((t) => t.status === 'completed');
 
   // Show only 7 most recent days by default
@@ -334,44 +325,70 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                 Roll: <strong className="text-[#111111] font-semibold">{student.username}</strong>
               </span>
               <span>•</span>
-              <span className="inline-flex items-center gap-1.5">
-                Guide:{' '}
-                {guide ? (
-                  <>
-                    <strong className="text-[#111111] font-semibold">{guide.fullName}</strong>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsChangingGuide(true);
-                        setSelectedGuideId(null);
-                        setGuideSearchQuery('');
-                        setGuideModalError(null);
-                        setShowRemoveConfirm(false);
-                      }}
-                      className="px-2 py-0.5 rounded-md bg-[#F3F4F6] hover:bg-gray-200 text-xs font-semibold text-[#111111] transition-colors cursor-pointer"
-                    >
-                      Change
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-[#D4202C] font-semibold">No guide</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsChangingGuide(true);
-                        setSelectedGuideId(null);
-                        setGuideSearchQuery('');
-                        setGuideModalError(null);
-                        setShowRemoveConfirm(false);
-                      }}
-                      className="px-2 py-0.5 rounded-md bg-[#D4202C] hover:bg-[#B81B26] text-xs font-semibold text-white transition-colors cursor-pointer"
-                    >
-                      Assign guide
-                    </button>
-                  </>
-                )}
-              </span>
+              {(() => {
+                const currentGuides = data.allGuides && data.allGuides.length > 0
+                  ? data.allGuides
+                  : (guide ? [{ id: guide.id, fullName: guide.fullName, username: guide.username, programs: ['General'] }] : []);
+
+                return (
+                  <span className="inline-flex items-center gap-1.5 flex-wrap">
+                    <span>Guides:</span>
+                    {currentGuides.length > 0 ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {currentGuides.map((cg) => (
+                            <span
+                              key={cg.id}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#F3F4F6] text-xs font-semibold text-[#111111]"
+                            >
+                              <span>{cg.fullName}</span>
+                              {cg.programs && cg.programs.length > 0 && (
+                                <span className="text-[10px] text-[#6B7280] font-normal">
+                                  ({cg.programs.join(', ')})
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsChangingGuide(true);
+                            setSelectedGuideIds(currentGuides.map((cg) => cg.id));
+                            setSelectedProgramId('general');
+                            setAssignMode('add');
+                            setGuideSearchQuery('');
+                            setGuideModalError(null);
+                            setShowRemoveConfirm(false);
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-[#F3F4F6] hover:bg-gray-200 text-xs font-semibold text-[#111111] transition-colors cursor-pointer"
+                        >
+                          Manage
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-[#D4202C] font-semibold">No guide</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsChangingGuide(true);
+                            setSelectedGuideIds([]);
+                            setSelectedProgramId('general');
+                            setAssignMode('add');
+                            setGuideSearchQuery('');
+                            setGuideModalError(null);
+                            setShowRemoveConfirm(false);
+                          }}
+                          className="px-2 py-0.5 rounded-md bg-[#D4202C] hover:bg-[#B81B26] text-xs font-semibold text-white transition-colors cursor-pointer"
+                        >
+                          Assign guides
+                        </button>
+                      </>
+                    )}
+                  </span>
+                );
+              })()}
               {student.email && (
                 <>
                   <span>•</span>
@@ -556,7 +573,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                 Tasks ({tasks.length})
               </h3>
               <p className="text-[13px] text-[#6B7280]">
-                {tasks.filter((t) => t.status === 'completed').length} completed • {tasks.filter((t) => t.status === 'awaiting_review').length} awaiting review • {tasks.filter((t) => t.status === 'assigned' || (t.status as any) === 'pending').length} assigned
+                {tasks.filter((t) => t.status === 'completed').length} completed • {tasks.filter((t) => t.status === 'submitted').length} awaiting review • {tasks.filter((t) => t.status === 'assigned').length} assigned
               </p>
             </div>
 
@@ -568,8 +585,8 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
               <div className="space-y-2.5 sm:space-y-3">
                 {tasks.map((task) => {
                   const isDone = task.status === 'completed';
-                  const isAwaitingReview = task.status === 'awaiting_review';
-                  const isAssigned = task.status === 'assigned' || (task.status as any) === 'pending';
+                  const isAwaitingReview = task.status === 'submitted';
+                  const isAssigned = task.status === 'assigned';
 
                   return (
                     <div
@@ -760,13 +777,13 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                         </div>
 
                         <span className="text-xs text-[#6B7280] block mt-1">
-                          Submitted: {new Date(s.submittedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          Submitted: {new Date(s.submittedAt || s.uploadedAt || s.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
 
-                      {!isPurged && s.fileId ? (
+                      {!isPurged && (s.fileId || s.storagePath) ? (
                         <button
-                          onClick={() => setViewingScreenshotId(s.fileId)}
+                          onClick={() => setViewingScreenshotId(s.fileId || s.storagePath || s.id)}
                           className="w-full py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors"
                         >
                           <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
@@ -1046,114 +1063,218 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
               </div>
             )}
 
-            {/* If currently assigned, allow Remove from this guide option */}
-            {guide && (
-              <div className="mx-4 mt-3 p-3 rounded-xl bg-[#F9FAFB] border border-[#E5E7EB] flex items-center justify-between gap-3">
-                <div className="text-xs text-[#6B7280]">
-                  Currently with <strong className="text-[#111111]">{guide.fullName}</strong>
+            <div className="p-4 overflow-y-auto flex-1 space-y-4">
+              {/* Currently Assigned Guides */}
+              {(() => {
+                const currentGuides = data.allGuides && data.allGuides.length > 0
+                  ? data.allGuides
+                  : (guide ? [{ id: guide.id, fullName: guide.fullName, username: guide.username, programs: ['General'] }] : []);
+
+                if (currentGuides.length === 0) return null;
+
+                return (
+                  <div className="p-3.5 rounded-xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2">
+                    <div className="text-xs font-semibold text-[#6B7280]">
+                      Currently assigned guides ({currentGuides.length}):
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {currentGuides.map((cg) => (
+                        <div
+                          key={cg.id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] shadow-2xs"
+                        >
+                          <span>{cg.fullName}</span>
+                          {cg.programs && cg.programs.length > 0 && cg.programs[0] !== 'General' && (
+                            <span className="text-[10px] text-[#6B7280] font-normal">
+                              ({cg.programs.join(', ')})
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleExecuteRemoveGuide(cg.id)}
+                            disabled={isGuideSubmitting}
+                            className="p-0.5 rounded hover:bg-red-50 text-[#D4202C] cursor-pointer"
+                            title={`Remove ${cg.fullName}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Assignment settings: Program & Mode */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-[#111111] mb-1">
+                    Program / Role
+                  </label>
+                  <select
+                    value={selectedProgramId}
+                    onChange={(e) => setSelectedProgramId(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl bg-[#F3F4F6] text-xs font-medium text-[#111111] border-0 focus:ring-2 focus:ring-[#D4202C]"
+                  >
+                    <option value="general">General Guide (All programs)</option>
+                    {programs.map((prog) => (
+                      <option key={prog.id} value={prog.id}>
+                        {prog.name} ({prog.category || 'Stage'})
+                      </option>
+                    ))}
+                  </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#111111] mb-1">
+                    Assignment Mode
+                  </label>
+                  <div className="flex items-center gap-2 h-10">
+                    <label className="flex items-center gap-1.5 text-xs text-[#111111] cursor-pointer">
+                      <input
+                        type="radio"
+                        name="drilldownAssignMode"
+                        checked={assignMode === 'add'}
+                        onChange={() => setAssignMode('add')}
+                        className="accent-[#D4202C]"
+                      />
+                      <span>Add (keep others)</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-xs text-[#111111] cursor-pointer ml-2">
+                      <input
+                        type="radio"
+                        name="drilldownAssignMode"
+                        checked={assignMode === 'replace'}
+                        onChange={() => setAssignMode('replace')}
+                        className="accent-[#D4202C]"
+                      />
+                      <span>Replace all</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Search box */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block text-xs font-semibold text-[#111111]">
+                    Select Guides ({selectedGuideIds.length} selected)
+                  </label>
+                  {selectedGuideIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGuideIds([])}
+                      className="text-xs text-[#6B7280] font-semibold hover:underline cursor-pointer"
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                </div>
+
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
+                  <input
+                    id="drilldown-guide-search"
+                    type="text"
+                    value={guideSearchQuery}
+                    onChange={(e) => setGuideSearchQuery(e.target.value)}
+                    placeholder="Search guides by name or username"
+                    className="w-full h-10 pl-9 pr-9 rounded-xl bg-[#F3F4F6] text-xs font-medium text-[#111111] placeholder:text-[#6B7280] border-0 focus:ring-2 focus:ring-[#D4202C]"
+                  />
+                  {guideSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setGuideSearchQuery('')}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6B7280] hover:text-[#111111]"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Guides List */}
+              <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                {availableGuides
+                  .filter((g) => {
+                    if (!guideSearchQuery.trim()) return true;
+                    return (
+                      matchesSearch(g.fullName, guideSearchQuery) ||
+                      matchesSearch(g.username, guideSearchQuery)
+                    );
+                  })
+                  .map((g) => {
+                    const isSelected = selectedGuideIds.includes(g.id);
+                    return (
+                      <div
+                        key={g.id}
+                        onClick={() => {
+                          setSelectedGuideIds((prev) =>
+                            prev.includes(g.id)
+                              ? prev.filter((id) => id !== g.id)
+                              : [...prev, g.id]
+                          );
+                        }}
+                        className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
+                          isSelected
+                            ? 'border-[#D4202C] bg-red-50/40 shadow-xs'
+                            : 'border-[#E5E7EB] bg-white hover:bg-gray-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            className="w-4 h-4 rounded text-[#D4202C] focus:ring-[#D4202C] border-gray-300 accent-[#D4202C] shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
+                              {g.fullName}
+                            </div>
+                            <div className="text-[11px] text-[#6B7280]">
+                              @{g.username}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#111111]">
+                            {g.studentCount} {g.studentCount === 1 ? 'student' : 'students'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-[#F3F4F6] flex items-center justify-between gap-2">
+              <span className="text-xs text-[#6B7280]">
+                {selectedGuideIds.length === 0
+                  ? 'No guides selected'
+                  : `${selectedGuideIds.length} ${selectedGuideIds.length === 1 ? 'guide' : 'guides'} selected`}
+              </span>
+              <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowRemoveConfirm(true)}
-                  className="px-2.5 py-1 rounded-lg text-xs font-semibold text-[#D4202C] hover:bg-red-50 flex items-center gap-1.5 cursor-pointer"
+                  onClick={() => setIsChangingGuide(false)}
+                  className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100 cursor-pointer"
                 >
-                  <UserMinus className="w-3.5 h-3.5" />
-                  <span>Remove from guide</span>
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteChangeGuide}
+                  disabled={selectedGuideIds.length === 0 || isGuideSubmitting}
+                  className="h-[42px] px-5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer flex items-center gap-2 transition-colors"
+                >
+                  {isGuideSubmitting
+                    ? 'Saving...'
+                    : `Assign ${selectedGuideIds.length} ${
+                        selectedGuideIds.length === 1 ? 'Guide' : 'Guides'
+                      }`}
                 </button>
               </div>
-            )}
-
-            {/* Search box */}
-            <div className="p-4 pb-2">
-              <div className="relative">
-                <label htmlFor="drilldown-guide-search" className="sr-only">
-                  Search guides
-                </label>
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#6B7280] pointer-events-none" />
-                <input
-                  id="drilldown-guide-search"
-                  type="text"
-                  value={guideSearchQuery}
-                  onChange={(e) => setGuideSearchQuery(e.target.value)}
-                  placeholder="Search guides by name or username"
-                  className="w-full h-[44px] pl-9 pr-9 rounded-[10px] bg-[#F3F4F6] text-xs sm:text-sm text-[#111111] placeholder:text-[#6B7280] border border-transparent focus:border-[#D4202C] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#D4202C]/20"
-                />
-                {guideSearchQuery && (
-                  <button
-                    type="button"
-                    onClick={() => setGuideSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-[#6B7280] hover:text-[#111111]"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Guides List */}
-            <div className="px-4 py-2 overflow-y-auto flex-1 space-y-2">
-              {availableGuides
-                .filter((g) => {
-                  if (guide && g.id === guide.id) return false;
-                  if (!guideSearchQuery.trim()) return true;
-                  return (
-                    matchesSearch(g.fullName, guideSearchQuery) ||
-                    matchesSearch(g.username, guideSearchQuery)
-                  );
-                })
-                .map((g) => {
-                  const isSelected = selectedGuideId === g.id;
-                  return (
-                    <div
-                      key={g.id}
-                      onClick={() => setSelectedGuideId(g.id)}
-                      className={`p-3 rounded-xl border flex items-center justify-between gap-3 cursor-pointer transition-all ${
-                        isSelected
-                          ? 'border-[#D4202C] bg-red-50/40 shadow-xs'
-                          : 'border-gray-200 bg-white hover:bg-gray-50'
-                      }`}
-                    >
-                      <div className="min-w-0">
-                        <div className="font-bold text-xs sm:text-sm text-[#111111] truncate">
-                          {g.fullName}
-                        </div>
-                        <div className="text-xs text-[#6B7280]">
-                          Roll: {g.username}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-[#F3F4F6] text-[#111111]">
-                          {g.studentCount} {g.studentCount === 1 ? 'student' : 'students'}
-                        </span>
-                        <div
-                          className={`w-4 h-4 rounded-full border flex items-center justify-center ${
-                            isSelected ? 'border-[#D4202C] bg-[#D4202C]' : 'border-gray-300'
-                          }`}
-                        >
-                          {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-            </div>
-
-            <div className="p-4 border-t border-[#F3F4F6] flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setIsChangingGuide(false)}
-                className="px-4 py-2 rounded-[10px] text-xs font-semibold text-[#6B7280] hover:bg-gray-100"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteChangeGuide}
-                disabled={!selectedGuideId || isGuideSubmitting}
-                className="h-[44px] px-5 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
-              >
-                {isGuideSubmitting ? 'Saving...' : guide ? 'Move' : 'Assign'}
-              </button>
             </div>
           </div>
         </div>
@@ -1187,7 +1308,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleExecuteRemoveGuide}
+                onClick={() => handleExecuteRemoveGuide()}
                 disabled={isGuideSubmitting}
                 className="px-4 py-2 rounded-[10px] bg-[#D4202C] hover:bg-[#B81B26] text-white text-xs font-semibold cursor-pointer disabled:opacity-50"
               >
