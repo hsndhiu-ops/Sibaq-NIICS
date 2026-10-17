@@ -3,7 +3,7 @@ import { Program, User } from '../../types';
 import { api } from '../../api';
 import { supabase } from '../../lib/supabase';
 import { TABLES, PROGRAM_MEMBERS_COLS, PROGRAMS_COLS, PROFILES_COLS } from '../../lib/schema';
-import { Plus, Edit2, Trash2, Users, UserCheck, X, Search, Loader2, AlertCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, Users, UserCheck, X, Search, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface AdminProgramsProps {
@@ -378,6 +378,15 @@ export const AdminPrograms: React.FC<AdminProgramsProps> = ({ onNotify }) => {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => loadData()}
+            disabled={loading}
+            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors cursor-pointer"
+            title="Refresh programs"
+            aria-label="Refresh programs"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#D4202C]' : ''}`} />
+          </button>
           <button
             onClick={() => setIsAssigningGuide(true)}
             className="px-3 py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 cursor-pointer"

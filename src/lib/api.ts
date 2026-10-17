@@ -447,6 +447,8 @@ export const api = {
         score_level,
         note,
         points,
+        marked_by,
+        marked_at,
         profiles:student_id (id, full_name, username)
       `)
       .in(ATTENDANCE_COLS.PROGRAM_ID, programIds)
@@ -490,7 +492,7 @@ export const api = {
 
       const pPresent = students.filter((s) => s.attendance.status === 'present').length;
       const pMarked = students.filter(
-        (s) => s.attendance.status === 'present' ? s.attendance.scoreLevel !== null : true
+        (s) => s.attendance.status === 'present' || s.attendance.markedBy !== null || s.attendance.markedAt !== null
       ).length;
 
       overallTotal += students.length;
@@ -502,7 +504,7 @@ export const api = {
         programName: prog.name,
         kind: prog.kind,
         studentsCount: students.length,
-        markedCount: pPresent,
+        markedCount: pMarked,
         students,
       };
     });
@@ -524,20 +526,63 @@ export const api = {
     id: string,
     data: { status: 'present' | 'absent'; score_level: number | null; note: string | null }
   ): Promise<void> => {
-    const payload: any = {
-      [ATTENDANCE_COLS.STATUS]: data.status,
-      [ATTENDANCE_COLS.SCORE_LEVEL]: data.status === 'absent' ? null : data.score_level,
-      [ATTENDANCE_COLS.NOTE]: data.note,
-    };
+    // 1. Try server-side proxy route first (runs with SUPABASE_SERVICE_ROLE_KEY to bypass RLS)
+    try {
+      let callerId: string | null = null;
+      try {
+        const me = (await api.getMe()).user;
+        callerId = me.id;
+      } catch {}
 
-    const { error } = await supabase
-      .from(TABLES.ATTENDANCE)
-      .update(payload)
-      .eq(ATTENDANCE_COLS.ID, id);
+      await callSecretServerEndpoint('/api/update-attendance', {
+        method: 'POST',
+        body: JSON.stringify({
+          id,
+          status: data.status,
+          score_level: data.status === 'absent' ? null : data.score_level,
+          note: data.note || null,
+          marked_by: callerId,
+        }),
+      });
+      return;
+    } catch (endpointErr: any) {
+      console.warn('[updateAttendanceRow] Server endpoint failed, attempting RPC/direct fallback:', endpointErr?.message || endpointErr);
+    }
 
-    if (error) {
-      console.error('[updateAttendanceRow] error:', error.message || error);
-      throw new Error(error.message || "Couldn't save. Try again.");
+    // 2. Try calling RPC mark_attendance if provided by database
+    const { error: rpcErr } = await supabase.rpc('mark_attendance', {
+      p_attendance: id,
+      p_status: data.status,
+      p_score_level: data.status === 'absent' ? null : data.score_level,
+      p_note: data.note || null,
+    });
+
+    if (rpcErr) {
+      let callerId: string | null = null;
+      try {
+        const me = (await api.getMe()).user;
+        callerId = me.id;
+      } catch {}
+
+      const payload: any = {
+        [ATTENDANCE_COLS.STATUS]: data.status,
+        [ATTENDANCE_COLS.SCORE_LEVEL]: data.status === 'absent' ? null : data.score_level,
+        [ATTENDANCE_COLS.NOTE]: data.note,
+        [ATTENDANCE_COLS.MARKED_AT]: new Date().toISOString(),
+      };
+      if (callerId) {
+        payload[ATTENDANCE_COLS.MARKED_BY] = callerId;
+      }
+
+      const { error } = await supabase
+        .from(TABLES.ATTENDANCE)
+        .update(payload)
+        .eq(ATTENDANCE_COLS.ID, id);
+
+      if (error) {
+        console.error('[updateAttendanceRow] error:', error.message || error);
+        throw new Error(error.message || "Couldn't save. Try again.");
+      }
     }
   },
 
@@ -979,22 +1024,58 @@ export const api = {
       return { notifications: [], unreadCount: 0 };
     }
 
-    const notifications: AppNotification[] = (data || []).map((row) => ({
-      id: row[NOTIFICATIONS_COLS.ID],
-      userId: row[NOTIFICATIONS_COLS.USER_ID],
-      senderId: row[NOTIFICATIONS_COLS.SENDER_ID],
-      senderName: row[NOTIFICATIONS_COLS.SENDER_NAME] || '',
-      type: row[NOTIFICATIONS_COLS.TYPE],
-      title: row[NOTIFICATIONS_COLS.TITLE] || 'Notification',
-      body: row[NOTIFICATIONS_COLS.BODY] || '',
-      message: row[NOTIFICATIONS_COLS.BODY] || '',
-      programId: row[NOTIFICATIONS_COLS.PROGRAM_ID] || null,
-      programName: row[NOTIFICATIONS_COLS.PROGRAM_NAME] || null,
-      readAt: row[NOTIFICATIONS_COLS.READ_AT] || null,
-      read: Boolean(row[NOTIFICATIONS_COLS.READ_AT]),
-      emailedAt: row[NOTIFICATIONS_COLS.EMAILED_AT] || null,
-      createdAt: row[NOTIFICATIONS_COLS.CREATED_AT],
-    }));
+    const rawRows = data || [];
+    const senderIds = Array.from(new Set(rawRows.map((r) => r.sender_id).filter(Boolean)));
+    const programIds = Array.from(new Set(rawRows.map((r) => r.program_id).filter(Boolean)));
+
+    const [sendersRes, progsRes] = await Promise.all([
+      senderIds.length > 0
+        ? supabase.from(TABLES.PROFILES).select('id, full_name, username, role').in('id', senderIds)
+        : Promise.resolve({ data: [] }),
+      programIds.length > 0
+        ? supabase.from(TABLES.PROGRAMS).select('id, name').in('id', programIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const sendersMap = new Map((sendersRes.data || []).map((s: any) => [s.id, s]));
+    const progMap = new Map((progsRes.data || []).map((p: any) => [p.id, p.name]));
+
+    const notifications: AppNotification[] = rawRows.map((row) => {
+      const senderProf = row[NOTIFICATIONS_COLS.SENDER_ID]
+        ? sendersMap.get(row[NOTIFICATIONS_COLS.SENDER_ID])
+        : null;
+
+      let senderName = row[NOTIFICATIONS_COLS.SENDER_NAME] || '';
+      if (!senderName && senderProf) {
+        const roleLabel = senderProf.role === 'guide' ? 'Guide' : (senderProf.role === 'admin' ? 'Admin' : '');
+        const namePart = senderProf.full_name || senderProf.username || 'User';
+        senderName = roleLabel ? `${namePart} (${roleLabel})` : namePart;
+      } else if (!senderName) {
+        senderName = row[NOTIFICATIONS_COLS.TYPE] === 'admin_reminder' ? 'Admin' : 'Mentor';
+      }
+
+      const programName =
+        row[NOTIFICATIONS_COLS.PROGRAM_NAME] ||
+        (row[NOTIFICATIONS_COLS.PROGRAM_ID] ? progMap.get(row[NOTIFICATIONS_COLS.PROGRAM_ID]) : null) ||
+        null;
+
+      return {
+        id: row[NOTIFICATIONS_COLS.ID],
+        userId: row[NOTIFICATIONS_COLS.USER_ID],
+        senderId: row[NOTIFICATIONS_COLS.SENDER_ID],
+        senderName,
+        type: row[NOTIFICATIONS_COLS.TYPE],
+        title: row[NOTIFICATIONS_COLS.TITLE] || 'Notification',
+        body: row[NOTIFICATIONS_COLS.BODY] || '',
+        message: row[NOTIFICATIONS_COLS.BODY] || '',
+        programId: row[NOTIFICATIONS_COLS.PROGRAM_ID] || null,
+        programName,
+        readAt: row[NOTIFICATIONS_COLS.READ_AT] || null,
+        read: Boolean(row[NOTIFICATIONS_COLS.READ_AT]),
+        emailedAt: row[NOTIFICATIONS_COLS.EMAILED_AT] || null,
+        createdAt: row[NOTIFICATIONS_COLS.CREATED_AT],
+      };
+    });
 
     const unreadCount = notifications.filter((n) => !n.readAt).length;
     return { notifications, unreadCount };
@@ -1343,7 +1424,7 @@ export const api = {
     const students = (allProfiles || []).filter((p) => p.role === 'student');
     const guides = (allProfiles || []).filter((p) => p.role === 'guide');
 
-    // 2. Fetch all programs and program guides
+    // 2. Fetch all programs, program guides, and program members
     const [{ data: programs }, { data: pGuides }, { data: pMembers }] = await Promise.all([
       supabase.from(TABLES.PROGRAMS).select('id, name, kind'),
       supabase.from(TABLES.PROGRAM_GUIDES).select('program_id, guide_id'),
@@ -1353,7 +1434,7 @@ export const api = {
     const progMap = new Map<string, any>((programs || []).map((p) => [p.id, p]));
     const guideUserMap = new Map<string, any>(guides.map((g) => [g.id, g]));
 
-    // 3. Fetch today's attendance rows including marked_by and marked_at
+    // 3. Fetch today's attendance rows
     const { data: attRows, error: attErr } = await supabase
       .from(TABLES.ATTENDANCE)
       .select('id, student_id, program_id, status, score_level, note, points, marked_by, marked_at')
@@ -1361,10 +1442,10 @@ export const api = {
 
     if (attErr) console.error('[getAdminToday] attendance error:', attErr.message || attErr);
 
-    const attByStudent = new Map<string, any[]>();
+    // Map attendance rows by studentId + '_' + programId
+    const attMap = new Map<string, any>();
     for (const r of attRows || []) {
-      if (!attByStudent.has(r.student_id)) attByStudent.set(r.student_id, []);
-      attByStudent.get(r.student_id)!.push(r);
+      attMap.set(`${r.student_id}_${r.program_id}`, r);
     }
 
     // 4. Fetch screenshots for today
@@ -1374,100 +1455,158 @@ export const api = {
       .eq(SCREENSHOT_LOG_COLS.DATE, date);
     const screenStudents = new Set((screenRows || []).map((s) => s.student_id));
 
+    // 5. Fast batch fetch for points and streaks (replaces 100 individual slow RPC roundtrips)
+    const { data: allAttHistory } = await supabase
+      .from(TABLES.ATTENDANCE)
+      .select('student_id, date, status, points')
+      .lte(ATTENDANCE_COLS.DATE, date)
+      .order(ATTENDANCE_COLS.DATE, { ascending: false });
+
+    const pointsMap = new Map<string, number>();
+    const datesByStudent = new Map<string, Map<string, string>>();
+
+    for (const row of allAttHistory || []) {
+      const p = pointsMap.get(row.student_id) || 0;
+      pointsMap.set(row.student_id, p + (Number(row.points) || 0));
+
+      if (!datesByStudent.has(row.student_id)) {
+        datesByStudent.set(row.student_id, new Map());
+      }
+      // If student has multiple sessions on a date, present wins
+      const existing = datesByStudent.get(row.student_id)!.get(row.date);
+      if (existing !== 'present') {
+        datesByStudent.get(row.student_id)!.set(row.date, row.status);
+      }
+    }
+
+    const calculateFastStreak = (studentId: string): number => {
+      const studentDates = datesByStudent.get(studentId);
+      if (!studentDates) return 0;
+      let streak = 0;
+      const cur = new Date(date);
+      let curStr = cur.toISOString().split('T')[0];
+      if (studentDates.get(curStr) !== 'present') {
+        cur.setDate(cur.getDate() - 1);
+        curStr = cur.toISOString().split('T')[0];
+      }
+      while (studentDates.get(curStr) === 'present') {
+        streak++;
+        cur.setDate(cur.getDate() - 1);
+        curStr = cur.toISOString().split('T')[0];
+      }
+      return streak;
+    };
+
     // Stats calculations
     let presentStudentCount = 0;
     let absentStudentCount = 0;
     let unscoredSessionCount = 0;
 
-    // Student roster
-    const roster = await Promise.all(
-      students.map(async (st) => {
-        const rows = attByStudent.get(st.id) || [];
-        const hasPresent = rows.some((r) => r.status === 'present');
-        const hasExplicitAbsent = rows.some((r) => r.status === 'absent' && (r.marked_by || r.marked_at));
+    // Build Student Roster: based on students enrolled in programs
+    const roster = students.map((st) => {
+      const studentEnrollments = (pMembers || []).filter((m) => m.student_id === st.id);
 
-        if (hasPresent) {
-          presentStudentCount++;
-        } else if (hasExplicitAbsent) {
-          absentStudentCount++;
+      let studentHasPresent = false;
+      let studentHasMarkedAbsent = false;
+
+      const sessions = studentEnrollments.map((enr) => {
+        const prog = progMap.get(enr.program_id);
+        const att = attMap.get(`${st.id}_${enr.program_id}`);
+
+        // A session is actively marked if status is present, or marked_at/marked_by set, or note added
+        const isMarked = Boolean(
+          att && (
+            att.status === 'present' ||
+            att.marked_by !== null ||
+            att.marked_at !== null ||
+            (att.note && att.note.trim().length > 0)
+          )
+        );
+
+        const status: 'present' | 'absent' = att?.status === 'present' ? 'present' : 'absent';
+        if (status === 'present') {
+          studentHasPresent = true;
+        } else if (isMarked) {
+          studentHasMarkedAbsent = true;
         }
 
-        const sessions = rows.map((r) => {
-          const prog = progMap.get(r.program_id);
-          const scoreLevel = r.score_level !== null && r.score_level !== undefined ? Number(r.score_level) : null;
-          const level = scoreLevel && scoreLevel in SCORE_LEVEL_MAP ? (SCORE_LEVEL_MAP as any)[scoreLevel] : null;
+        const rawScore = att?.score_level;
+        const scoreLevel = rawScore !== null && rawScore !== undefined ? Number(rawScore) : null;
+        const level = scoreLevel && scoreLevel in SCORE_LEVEL_MAP ? (SCORE_LEVEL_MAP as any)[scoreLevel] : null;
 
-          if (r.status === 'present' && scoreLevel === null) {
-            unscoredSessionCount++;
-          }
+        if (status === 'present' && scoreLevel === null) {
+          unscoredSessionCount++;
+        }
 
-          const isMarked = r.status === 'present'
-            ? scoreLevel !== null
-            : Boolean(r.marked_by || r.marked_at);
-
-          const displayStatus = r.status === 'present'
-            ? (scoreLevel !== null ? `Present · ${scoreLevel}` : 'Not scored yet')
-            : (isMarked ? 'Absent' : 'Not met yet');
-
-          // Find guide for this program
-          const pg = (pGuides || []).find((g) => g.program_id === r.program_id);
-          const gUser = pg ? guideUserMap.get(pg.guide_id) : null;
-
-          return {
-            programId: r.program_id,
-            programName: prog?.name || 'Program',
-            guideName: gUser?.full_name || 'Guide',
-            status: r.status as 'present' | 'absent',
-            scoreLevel,
-            level,
-            points: r.points,
-            note: r.note || null,
-            isMarked,
-            displayStatus,
-          };
-        });
-
-        // Current streak & student points
-        const [{ data: streakVal }, { data: ptsVal }] = await Promise.all([
-          supabase.rpc(RPCS.CURRENT_STREAK, { [RPC_ARGS.CURRENT_STREAK.STUDENT]: st.id }),
-          supabase.rpc(RPCS.STUDENT_POINTS, { [RPC_ARGS.STUDENT_POINTS.STUDENT]: st.id }),
-        ]);
+        // Find ALL guides assigned to this program
+        const progGuides = (pGuides || []).filter((g) => g.program_id === enr.program_id);
+        const guideNames = progGuides
+          .map((pg) => guideUserMap.get(pg.guide_id)?.full_name || guideUserMap.get(pg.guide_id)?.username)
+          .filter(Boolean);
 
         return {
-          studentId: st.id,
-          studentName: st.full_name || st.username,
-          studentRoll: st.username,
-          sessions,
-          streak: typeof streakVal === 'number' ? streakVal : 0,
-          totalPoints: typeof ptsVal === 'number' ? ptsVal : 0,
-          hasScreenshot: screenStudents.has(st.id),
+          programId: enr.program_id,
+          programName: prog?.name || 'Program',
+          guideName: guideNames.length > 0 ? guideNames.join(', ') : 'Unassigned',
+          status,
+          isMarked,
+          scoreLevel,
+          level,
+          points: att?.points ?? (status === 'present' ? scoreLevel : 0),
+          note: att?.note || null,
         };
-      })
-    );
+      });
+
+      if (studentHasPresent) {
+        presentStudentCount++;
+      } else if (studentHasMarkedAbsent) {
+        absentStudentCount++;
+      }
+
+      return {
+        studentId: st.id,
+        studentName: st.full_name || st.username,
+        studentRoll: st.username,
+        sessions,
+        streak: calculateFastStreak(st.id),
+        totalPoints: pointsMap.get(st.id) || 0,
+        hasScreenshot: screenStudents.has(st.id),
+      };
+    });
 
     roster.sort((a, b) => a.studentName.localeCompare(b.studentName));
 
-    // Guides' progress calculation
+    // Guides' progress calculation:
+    // For each guide, find all programs they guide.
+    // Count enrolled students across those programs = totalSessions.
+    // Count sessions that have been actively marked = markedSessions.
     let unmarkedGuidesCount = 0;
     const guidesProgress = guides.map((g) => {
-      // Find programs this guide guides
       const gPrograms = (pGuides || []).filter((pg) => pg.guide_id === g.id).map((pg) => pg.program_id);
-      // All attendance rows for these programs today
-      const gAttRows = (attRows || []).filter((a) => gPrograms.includes(a.program_id));
-      const totalSessions = gAttRows.length;
+      const gSessions = (pMembers || []).filter((pm) => gPrograms.includes(pm.program_id));
+      const totalSessions = gSessions.length;
 
-      // Marked session: Present with score chosen, OR explicitly marked absent by guide/admin
-      const markedSessions = gAttRows.filter((a) => {
-        if (a.status === 'present') {
-          return a.score_level !== null && a.score_level !== undefined;
+      let markedSessions = 0;
+      for (const s of gSessions) {
+        const att = attMap.get(`${s.student_id}_${s.program_id}`);
+        // Marked if explicitly marked present, or marked_at/marked_by set, or note added
+        if (
+          att &&
+          (att.status === 'present' ||
+            att.marked_by !== null ||
+            att.marked_at !== null ||
+            (att.note && att.note.trim().length > 0))
+        ) {
+          markedSessions++;
         }
-        return Boolean(a.marked_by || a.marked_at);
-      }).length;
+      }
 
       const allMarked = totalSessions > 0 && markedSessions === totalSessions;
-      if (totalSessions > 0 && !allMarked) {
+      if (totalSessions > 0 && markedSessions < totalSessions) {
         unmarkedGuidesCount++;
       }
+
+      const unmarkedCount = Math.max(0, totalSessions - markedSessions);
 
       return {
         guideId: g.id,
@@ -1476,7 +1615,7 @@ export const api = {
         programsCount: gPrograms.length,
         sessionsCount: totalSessions,
         markedCount: markedSessions,
-        unmarkedCount: Math.max(0, totalSessions - markedSessions),
+        unmarkedCount,
         allMarked,
       };
     });
@@ -1920,37 +2059,8 @@ export const api = {
       studentProgramsMap.get(pm.student_id)!.push({ id: pm.program_id, name, guideNames });
     }
 
-    // Build guide students map: guideId -> Set of unique studentIds
-    const guideStudentsMap = new Map<string, Set<string>>();
-    for (const pm of pmRows || []) {
-      const progGuides = (pgRows || []).filter((pg) => pg.program_id === pm.program_id);
-      for (const pg of progGuides) {
-        if (!guideStudentsMap.has(pg.guide_id)) guideStudentsMap.set(pg.guide_id, new Set<string>());
-        guideStudentsMap.get(pg.guide_id)!.add(pm.student_id);
-      }
-    }
-
-    const enrichedUsers = users.map((u) => {
-      if (u.role === 'guide') {
-        const progs = guideProgramsMap.get(u.id) || [];
-        const studentCount = guideStudentsMap.get(u.id)?.size || 0;
-        return {
-          ...u,
-          programs: progs,
-          studentCount,
-        };
-      } else if (u.role === 'student') {
-        const progs = studentProgramsMap.get(u.id) || [];
-        return {
-          ...u,
-          programs: progs,
-        };
-      }
-      return u;
-    });
-
     return {
-      accounts: enrichedUsers,
+      accounts: users,
       guideProgramsMap,
       studentProgramsMap,
     };
@@ -2035,6 +2145,47 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ userId, active }),
     });
+  },
+
+  getAccountDeleteImpact: async (userId: string, role: string) => {
+    try {
+      if (role === 'guide') {
+        const [{ count: progCount }, { count: taskCount }, { count: remarkCount }] = await Promise.all([
+          supabase.from(TABLES.PROGRAM_GUIDES).select('*', { count: 'exact', head: true }).eq('guide_id', userId),
+          supabase.from(TABLES.TASKS).select('*', { count: 'exact', head: true }).eq('guide_id', userId),
+          supabase.from(TABLES.REMARKS).select('*', { count: 'exact', head: true }).eq('guide_id', userId),
+        ]);
+        return {
+          programsGuided: progCount || 0,
+          attendanceDays: 0,
+          tasksCount: taskCount || 0,
+          remarksCount: remarkCount || 0,
+          filesCount: 0,
+        };
+      } else {
+        const [{ count: attCount }, { count: taskCount }, { count: remarkCount }, { count: screenCount }] = await Promise.all([
+          supabase.from(TABLES.ATTENDANCE).select('*', { count: 'exact', head: true }).eq('student_id', userId),
+          supabase.from(TABLES.TASKS).select('*', { count: 'exact', head: true }).eq('student_id', userId),
+          supabase.from(TABLES.REMARKS).select('*', { count: 'exact', head: true }).eq('student_id', userId),
+          supabase.from(TABLES.SCREENSHOT_LOG).select('*', { count: 'exact', head: true }).eq('student_id', userId),
+        ]);
+        return {
+          programsGuided: 0,
+          attendanceDays: attCount || 0,
+          tasksCount: taskCount || 0,
+          remarksCount: remarkCount || 0,
+          filesCount: screenCount || 0,
+        };
+      }
+    } catch {
+      return {
+        programsGuided: 0,
+        attendanceDays: 0,
+        tasksCount: 0,
+        remarksCount: 0,
+        filesCount: 0,
+      };
+    }
   },
 
   uploadFile: async (
@@ -2191,7 +2342,20 @@ export const api = {
       }
       const { data: rows } = await q;
       if (rows && rows.length > 0) {
-        attendanceId = rows[0].id;
+        const score_level = dataToApply.score_level !== undefined
+          ? dataToApply.score_level
+          : (dataToApply.scoreLevel !== undefined
+            ? dataToApply.scoreLevel
+            : (dataToApply.level ? LADDER_POINTS[dataToApply.level as LadderLevel] : null));
+
+        for (const r of rows) {
+          await api.updateAttendanceRow(r.id, {
+            status: dataToApply.status,
+            score_level,
+            note: dataToApply.note || null,
+          });
+        }
+        return;
       }
     }
 
@@ -2233,8 +2397,8 @@ export const api = {
     pointsDistribution: {},
   }),
 
-  getAdminGuides: async () => {
-    const today = await api.getAdminToday();
+  getAdminGuides: async (dateParam?: string) => {
+    const today = await api.getAdminToday(dateParam);
 
     // Fetch all programs and program guides to know which programs each guide guides
     const [{ data: pgRows }, { data: progRows }] = await Promise.all([

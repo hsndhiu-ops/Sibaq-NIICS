@@ -26,6 +26,7 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
   const [allPrograms, setAllPrograms] = useState<Program[]>([]);
   const [date, setDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -58,10 +59,18 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
 
   useEffect(() => {
     loadGuides();
+
+    // Auto-refresh every 25 seconds for live guide updates
+    const timer = setInterval(() => {
+      loadGuides(true);
+    }, 25000);
+
+    return () => clearInterval(timer);
   }, []);
 
-  const loadGuides = async () => {
-    setLoading(true);
+  const loadGuides = async (isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    else setIsRefreshing(true);
     setError(null);
     try {
       const [res, progRes] = await Promise.all([
@@ -73,9 +82,10 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
       setAllPrograms(progRes.programs || []);
     } catch (err: any) {
       console.error('[AdminGuides] error loading guides:', err);
-      setError("Couldn't load guides. Please try again.");
+      if (!isSilent) setError("Couldn't load guides. Please try again.");
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -225,13 +235,23 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          <button
+            type="button"
+            onClick={() => loadGuides()}
+            disabled={loading || isRefreshing}
+            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors cursor-pointer"
+            title="Refresh guides and progress"
+            aria-label="Refresh guides and progress"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing || loading ? 'animate-spin text-[#D4202C]' : ''}`} />
+          </button>
+
           <button
             type="button"
             onClick={() => handleOpenReplaceModal()}
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#D4202C] text-white text-xs sm:text-sm font-semibold hover:bg-[#b01b24] transition-colors cursor-pointer shadow-xs"
           >
-            <RefreshCw className="w-4 h-4" />
             <span>Switch all programs</span>
           </button>
         </div>
@@ -260,7 +280,7 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
           </div>
           <button
             type="button"
-            onClick={loadGuides}
+            onClick={() => loadGuides()}
             className="font-semibold underline hover:no-underline ml-4 cursor-pointer"
           >
             Retry
@@ -323,30 +343,32 @@ export const AdminGuides: React.FC<AdminGuidesProps> = ({ onNotify }) => {
 
                   {/* Status chip / Remind button */}
                   <div className="shrink-0 flex items-center gap-2">
-                    {guide.sessionsCount === 0 ? (
-                      <span className="text-xs text-[#6B7280] font-medium px-2 py-1">
+                    {guide.sessionsCount > 0 ? (
+                      guide.allMarked ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-green-700 border border-green-200">
+                          <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                          <span>All marked</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRemind(guide.id, guide.fullName)}
+                          disabled={hasCooldown || isReminding}
+                          className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
+                            hasCooldown
+                              ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                              : 'bg-white text-[#111111] hover:bg-gray-100 border border-[#E5E7EB]'
+                          }`}
+                          title="Send attendance reminder"
+                        >
+                          <Bell className="w-3.5 h-3.5 text-[#D4202C]" />
+                          <span>{hasCooldown ? 'Sent' : isReminding ? 'Sending...' : 'Remind'}</span>
+                        </button>
+                      )
+                    ) : (
+                      <span className="text-xs text-[#6B7280] px-2.5 py-1 rounded-lg bg-gray-100 font-medium">
                         No sessions
                       </span>
-                    ) : guide.allMarked ? (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-green-700 border border-green-200">
-                        <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                        <span>All marked</span>
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => handleRemind(guide.id, guide.fullName)}
-                        disabled={hasCooldown || isReminding}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                          hasCooldown
-                            ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                            : 'bg-white text-[#111111] hover:bg-gray-100 border border-[#E5E7EB]'
-                        }`}
-                        title="Send attendance reminder"
-                      >
-                        <Bell className="w-3.5 h-3.5 text-[#D4202C]" />
-                        <span>{hasCooldown ? 'Sent' : isReminding ? 'Sending...' : 'Remind'}</span>
-                      </button>
                     )}
                   </div>
                 </div>

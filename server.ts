@@ -17,6 +17,8 @@ import updateUserHandler from './api/update-user';
 import assignGuideHandler from './api/assign-guide';
 import purgeScreenshotsHandler from './api/purge-screenshots';
 import deleteUserHandler from './api/delete-user';
+import setActiveHandler from './api/set-active';
+import updateAttendanceHandler from './api/update-attendance';
 import {
   startBackgroundJobs,
   runMidnightAbsentJob,
@@ -57,8 +59,12 @@ async function startServer() {
   app.post('/api/admin/delete-user', deleteUserHandler);
   app.delete('/api/delete-user', deleteUserHandler);
   app.delete('/api/admin/delete-user', deleteUserHandler);
+  app.post('/api/set-active', setActiveHandler);
+  app.post('/api/admin/set-active', setActiveHandler);
   app.post('/api/assign-guide', assignGuideHandler);
   app.post('/api/admin/assign-guide', assignGuideHandler);
+  app.post('/api/update-attendance', updateAttendanceHandler);
+  app.post('/api/admin/update-attendance', updateAttendanceHandler);
   app.all('/api/purge-screenshots', purgeScreenshotsHandler);
   app.all('/api/admin/purge-screenshots', purgeScreenshotsHandler);
 

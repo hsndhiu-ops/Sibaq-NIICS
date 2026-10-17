@@ -31,6 +31,7 @@ import { AdminScreenshots } from './components/admin/AdminScreenshots';
 import { AdminCharts } from './components/admin/AdminCharts';
 import { AdminAuditLog } from './components/admin/AdminAuditLog';
 import { AdminStudentDrillDown } from './components/admin/AdminStudentDrillDown';
+import { AdminSendNotificationModal } from './components/admin/AdminSendNotificationModal';
 
 import {
   Home,
@@ -46,6 +47,7 @@ import {
   UserCheck,
   MoreHorizontal,
   X,
+  Send,
 } from 'lucide-react';
 
 export default function App() {
@@ -61,6 +63,7 @@ export default function App() {
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isMoreSheetOpen, setIsMoreSheetOpen] = useState(false);
+  const [isAdminNotifyOpen, setIsAdminNotifyOpen] = useState(false);
 
   // Feedback toast message
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -336,6 +339,16 @@ export default function App() {
                   </button>
                 );
               })}
+              <div className="pt-2 mt-2 border-t border-[#E5E7EB]">
+                <button
+                  type="button"
+                  onClick={() => setIsAdminNotifyOpen(true)}
+                  className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-[#111111] hover:bg-[#F3F4F6] transition-colors cursor-pointer"
+                >
+                  <Send className="w-4 h-4 text-[#D4202C] shrink-0" />
+                  <span className="truncate">Send notification</span>
+                </button>
+              </div>
             </nav>
           </aside>
 
@@ -561,12 +574,32 @@ export default function App() {
                       </button>
                     );
                   })}
+                  <div className="pt-2 mt-2 border-t border-[#F3F4F6]">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsMoreSheetOpen(false);
+                        setIsAdminNotifyOpen(true);
+                      }}
+                      className="w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-xs font-semibold text-[#111111] hover:bg-[#F3F4F6] transition-colors cursor-pointer"
+                    >
+                      <Send className="w-4 h-4 text-[#D4202C] shrink-0" />
+                      <span>Send notification</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
           )}
         </>
       )}
+
+      {/* Admin Broadcast Notification Modal */}
+      <AdminSendNotificationModal
+        isOpen={isAdminNotifyOpen}
+        onClose={() => setIsAdminNotifyOpen(false)}
+        onSent={(msg) => showToast(msg)}
+      />
 
       {/* Admin Student Drill-Down Modal */}
       {drillDownStudentId && (

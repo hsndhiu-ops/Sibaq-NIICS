@@ -458,7 +458,7 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
                             </div>
                             <div className="space-y-2">
                               {prog.groups.needsScore.map((s) =>
-                                renderStudentCard(s, prog.programId, prog.programName)
+                                renderStudentCard(s, prog.programId, prog.programName, allProgStudents)
                               )}
                             </div>
                           </div>
@@ -472,7 +472,7 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
                             </div>
                             <div className="space-y-2">
                               {prog.groups.notMetYet.map((s) =>
-                                renderStudentCard(s, prog.programId, prog.programName)
+                                renderStudentCard(s, prog.programId, prog.programName, allProgStudents)
                               )}
                             </div>
                           </div>
@@ -486,7 +486,7 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
                             </div>
                             <div className="space-y-2">
                               {prog.groups.done.map((s) =>
-                                renderStudentCard(s, prog.programId, prog.programName)
+                                renderStudentCard(s, prog.programId, prog.programName, allProgStudents)
                               )}
                             </div>
                           </div>
@@ -535,7 +535,8 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
   function renderStudentCard(
     s: { studentId: string; studentName: string; username: string; attendance: AttendanceRecord; note: string | null },
     programId: string,
-    programName: string
+    programName: string,
+    allProgStudents?: Array<{ id: string; name: string }>
   ) {
     const rowId = s.attendance.id;
     const isExpanded = expandedRowId === rowId;
@@ -557,6 +558,8 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
     const cooldownRemainingSec = isCooldownActive
       ? Math.ceil((cooldowns[s.studentId] - Date.now()) / 1000)
       : 0;
+
+    const progStudentList = allProgStudents || [{ id: s.studentId, name: s.studentName }];
 
     // Derived states
     const isAbsent = s.attendance.status === 'absent';
@@ -593,6 +596,25 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
               className="h-10 px-4 rounded-xl border-2 border-[#D4202C] text-[#D4202C] hover:bg-red-50 text-xs font-semibold transition-colors cursor-pointer"
             >
               Mark present
+            </button>
+
+            {/* Message button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMessageTarget({
+                  programId,
+                  programName,
+                  students: progStudentList,
+                  initialRecipientIds: [s.studentId],
+                });
+              }}
+              className="h-10 w-10 rounded-xl border border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#D4202C] hover:bg-gray-50 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              title={`Message ${s.studentName}`}
+              aria-label={`Message ${s.studentName}`}
+            >
+              <MessageSquare className="w-4 h-4" />
             </button>
 
             {/* Bell button */}
@@ -645,6 +667,25 @@ export const GuideToday: React.FC<GuideTodayProps> = ({ onRemindSuccess }) => {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            {/* Message button */}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMessageTarget({
+                  programId,
+                  programName,
+                  students: progStudentList,
+                  initialRecipientIds: [s.studentId],
+                });
+              }}
+              className="h-9 w-9 rounded-xl border border-[#E5E7EB] bg-white text-[#6B7280] hover:text-[#D4202C] hover:bg-gray-50 flex items-center justify-center transition-colors cursor-pointer shrink-0"
+              title={`Message ${s.studentName}`}
+              aria-label={`Message ${s.studentName}`}
+            >
+              <MessageSquare className="w-4 h-4" />
+            </button>
+
             <span className="text-xs font-semibold text-[#D4202C] hover:underline">
               Edit
             </span>

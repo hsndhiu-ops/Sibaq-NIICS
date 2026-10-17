@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AdminTodayData, LadderLevel, LADDER_POINTS } from '../../types';
 import { api } from '../../api';
-import { Check, Flame, Edit3, X, Calendar, ChevronLeft, ChevronRight, AlertCircle, Search } from 'lucide-react';
+import { Check, Flame, Edit3, X, Calendar, ChevronLeft, ChevronRight, AlertCircle, Search, RefreshCw } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface AdminTodayProps {
@@ -25,6 +25,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
   const [data, setData] = useState<AdminTodayData | null>(null);
   const [date, setDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const dateInputRef = useRef<HTMLInputElement>(null);
 
@@ -35,6 +36,8 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
     status: 'present' | 'absent';
     level: LadderLevel | null;
     note: string | null;
+    programId?: string;
+    programs?: any[];
   } | null>(null);
   const [editSaving, setEditSaving] = useState(false);
 
@@ -42,10 +45,18 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
 
   useEffect(() => {
     loadData(date || undefined);
+
+    // Auto-refresh every 25 seconds for live attendance updates
+    const timer = setInterval(() => {
+      loadData(date || undefined, true);
+    }, 25000);
+
+    return () => clearInterval(timer);
   }, [date]);
 
-  const loadData = async (selectedDate?: string) => {
-    setLoading(true);
+  const loadData = async (selectedDate?: string, isSilent = false) => {
+    if (!isSilent) setLoading(true);
+    else setIsRefreshing(true);
     setLoadError(null);
     try {
       const res = await api.getAdminOverview(selectedDate);
@@ -54,9 +65,10 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
         setDate(res.date);
       }
     } catch {
-      setLoadError("Couldn't load students. Try again.");
+      if (!isSilent) setLoadError("Couldn't load students. Try again.");
     } finally {
-      setLoading(false);
+      if (!isSilent) setLoading(false);
+      setIsRefreshing(false);
     }
   };
 
@@ -103,6 +115,7 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
     try {
       await api.adminEditAttendance({
         studentId: editingStudent.studentId,
+        programId: editingStudent.programId,
         date: data.date,
         status: editingStudent.status,
         level: editingStudent.status === 'present' ? editingStudent.level : null,
@@ -244,6 +257,16 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
           >
             <ChevronRight className="w-4 h-4" />
           </button>
+
+          <button
+            type="button"
+            onClick={() => loadData(date || undefined)}
+            className="p-2 rounded-xl bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors cursor-pointer"
+            title="Refresh attendance data"
+            aria-label="Refresh attendance data"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing || loading ? 'animate-spin text-[#D4202C]' : ''}`} />
+          </button>
         </div>
       </div>
 
@@ -351,30 +374,48 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                 Guides' progress
               </h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
-                {filteredGuidesStatus.map((g: any) => (
-                  <div
-                    key={g.guideId}
-                    className="p-3 rounded-xl bg-white flex items-center justify-between text-xs"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <div className="font-bold text-[#111111] truncate">{g.guideName}</div>
-                      <div className="text-[#6B7280] text-xs mt-0.5">
-                        {g.markedCount} of {g.sessionsCount ?? g.menteesCount ?? 0} marked
+                {filteredGuidesStatus.map((g: any) => {
+                  const hasSessions = (g.sessionsCount ?? 0) > 0;
+                  const isAllMarked = hasSessions && Boolean(g.allMarked);
+
+                  return (
+                    <div
+                      key={g.guideId}
+                      className="p-3 rounded-xl bg-white flex items-center justify-between text-xs"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <div className="font-bold text-[#111111] truncate">{g.guideName}</div>
+                        <div className="text-[#6B7280] text-xs mt-0.5">
+                          {hasSessions ? (
+                            <span>{g.markedCount} of {g.sessionsCount} marked</span>
+                          ) : (
+                            <span className="italic text-gray-400">No sessions today</span>
+                          )}
+                        </div>
                       </div>
+                      {hasSessions ? (
+                        isAllMarked ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-white text-green-700 border border-green-200 shrink-0">
+                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>All marked</span>
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleRemindGuide(g.guideId)}
+                            className="px-2.5 py-1 rounded-lg bg-white border border-[#E5E7EB] text-[#111111] font-semibold hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
+                          >
+                            Remind
+                          </button>
+                        )
+                      ) : (
+                        <span className="text-[#6B7280] text-[11px] px-2 py-0.5 rounded bg-gray-100 shrink-0 font-medium">
+                          No programs
+                        </span>
+                      )}
                     </div>
-                    {!g.allMarked && (g.sessionsCount > 0 || g.menteesCount > 0) ? (
-                      <button
-                        type="button"
-                        onClick={() => handleRemindGuide(g.guideId)}
-                        className="px-2.5 py-1 rounded-lg bg-white border border-[#E5E7EB] text-[#111111] font-semibold hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
-                      >
-                        Remind
-                      </button>
-                    ) : (
-                      <span className="text-[#111111] font-semibold px-2 py-1 shrink-0">Done</span>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -401,6 +442,12 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                     ? row.sessions.some((s: any) => s.status === 'present')
                     : row.status === 'present';
 
+                  const hasMarkedAbsent = row.sessions
+                    ? row.sessions.some((s: any) => s.isMarked && s.status === 'absent')
+                    : Boolean(row.isMarked && row.status === 'absent');
+
+                  const isPending = !isPresent && !hasMarkedAbsent;
+
                   const sessionsSummary = row.sessions && row.sessions.length > 0
                     ? row.sessions
                         .map(
@@ -408,9 +455,11 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                             `${s.programName}: ${
                               s.status === 'present'
                                 ? s.scoreLevel !== null
-                                  ? `Present ${s.scoreLevel}`
+                                  ? `Present (${s.scoreLevel})`
                                   : 'Present'
-                                : 'Absent'
+                                : s.isMarked
+                                ? 'Absent'
+                                : 'Not marked yet'
                             }`
                         )
                         .join(' • ')
@@ -442,10 +491,15 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                             <Check className="w-3.5 h-3.5 stroke-[3]" />
                             Present
                           </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white text-[#6B7280] text-xs font-semibold shrink-0">
+                        ) : hasMarkedAbsent ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-white text-[#6B7280] border border-[#E5E7EB] text-xs font-semibold shrink-0">
                             <span className="font-bold leading-none">-</span>
                             Absent
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white text-amber-700 border border-amber-200/80 text-xs font-semibold shrink-0">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                            Pending
                           </span>
                         )}
 
@@ -475,9 +529,11 @@ export const AdminToday: React.FC<AdminTodayProps> = ({
                             setEditingStudent({
                               studentId: row.studentId,
                               studentName: row.studentName,
-                              status: isPresent ? 'present' : 'absent',
+                              status: isPresent ? 'present' : (hasMarkedAbsent ? 'absent' : 'present'),
                               level: row.sessions?.[0]?.level || row.level || null,
                               note: row.sessions?.[0]?.note || row.note || '',
+                              programId: row.sessions?.[0]?.programId || '',
+                              programs: row.sessions || [],
                             })
                           }
                           className="p-1.5 sm:p-2 rounded-xl bg-white text-[#111111] hover:bg-gray-100 transition-colors shrink-0 cursor-pointer"
