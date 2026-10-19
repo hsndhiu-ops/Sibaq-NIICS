@@ -16,9 +16,12 @@ import resetPasswordHandler from './api/reset-password';
 import updateUserHandler from './api/update-user';
 import assignGuideHandler from './api/assign-guide';
 import purgeScreenshotsHandler from './api/purge-screenshots';
+import deleteScreenshotHandler from './api/delete-screenshot';
+import screenshotImageHandler from './api/screenshot-image';
 import deleteUserHandler from './api/delete-user';
 import setActiveHandler from './api/set-active';
 import updateAttendanceHandler from './api/update-attendance';
+import recordScreenshotHandler from './api/record-screenshot';
 import {
   startBackgroundJobs,
   runMidnightAbsentJob,
@@ -40,6 +43,11 @@ async function startServer() {
 
   // Attach session user to req.user if Authorization header present
   app.use(authMiddleware);
+
+  // Unauthenticated/cookie-free image streaming for native <img> tags across all devices
+  app.all('/api/admin/screenshot-image', screenshotImageHandler);
+  app.all('/api/screenshot-image', screenshotImageHandler);
+  app.all('/api/files/screenshot', screenshotImageHandler);
 
   // Mount API endpoints
   app.use('/api/auth', authRouter);
@@ -67,6 +75,9 @@ async function startServer() {
   app.post('/api/admin/update-attendance', updateAttendanceHandler);
   app.all('/api/purge-screenshots', purgeScreenshotsHandler);
   app.all('/api/admin/purge-screenshots', purgeScreenshotsHandler);
+  app.all('/api/delete-screenshot', deleteScreenshotHandler);
+  app.all('/api/admin/delete-screenshot', deleteScreenshotHandler);
+  app.all('/api/record-screenshot', recordScreenshotHandler);
 
   // Cron trigger endpoint for external invocation or admin testing
   app.post('/api/cron/trigger', (req: any, res) => {

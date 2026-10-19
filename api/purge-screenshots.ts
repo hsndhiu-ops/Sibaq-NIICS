@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 /**
  * Vercel Serverless Function: /api/purge-screenshots
  *
- * Automatically or manually purges screenshots older than 48 hours
+ * Automatically or manually purges screenshots older than 26 hours
  * from the screenshots bucket and updates screenshot_log in public.profiles/screenshot_log.
  */
 export default async function handler(req: any, res: any) {
@@ -31,9 +31,9 @@ export default async function handler(req: any, res: any) {
       },
     });
 
-    const cutoffTime = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+    const cutoffTime = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
 
-    // Query screenshots uploaded over 48 hours ago that are not yet marked as deleted
+    // Query screenshots uploaded over 26 hours ago that are not yet marked as deleted
     const { data: oldScreenshots, error: queryErr } = await supabaseAdmin
       .from('screenshot_log')
       .select('id, storage_path')
@@ -75,7 +75,7 @@ export default async function handler(req: any, res: any) {
     return res.status(200).json({
       success: true,
       purgedCount,
-      message: `Purged ${purgedCount} screenshot files older than 48 hours.`,
+      message: `Purged ${purgedCount} screenshot files older than 26 hours.`,
     });
   } catch (err: any) {
     console.error('Exception in purge-screenshots serverless function:', err);

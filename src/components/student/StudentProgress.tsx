@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AttendanceRecord, RemarkRecord, Program, StudentProgramGuidesGroup, StudentAssignedGuide } from '../../types';
 import { api } from '../../api';
-import { Check, Clock, Users, Mail } from 'lucide-react';
+import { Check, Clock, Users, Mail, RefreshCw, Loader2 } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface StudentProgressProps {
@@ -11,6 +11,7 @@ interface StudentProgressProps {
   programGuides?: StudentProgramGuidesGroup[];
   allGuides?: StudentAssignedGuide[];
   hasUploadedScreenshotToday: boolean;
+  todayScreenshot?: { id: string; storagePath: string; uploadedAt?: string } | null;
   onRefresh: () => void;
 }
 
@@ -21,6 +22,7 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
   programGuides = [],
   allGuides = [],
   hasUploadedScreenshotToday,
+  todayScreenshot,
   onRefresh,
 }) => {
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
@@ -28,6 +30,45 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
   const [screenshotSuccess, setScreenshotSuccess] = useState<string | null>(null);
   const [screenshotError, setScreenshotError] = useState<string | null>(null);
   const [submittedTime, setSubmittedTime] = useState<string | null>(null);
+  const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
+  const [resolvedServerUrl, setResolvedServerUrl] = useState<string | null>(null);
+
+  const replaceInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Resolve screenshot image URL from storage path
+  useEffect(() => {
+    if (todayScreenshot?.storagePath) {
+      let cancelled = false;
+      api
+        .resolveScreenshotUrl(todayScreenshot.storagePath)
+        .then((url) => {
+          if (!cancelled && url) setResolvedServerUrl(url);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setResolvedServerUrl(`/api/screenshot-image?path=${encodeURIComponent(todayScreenshot.storagePath)}`);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+  }, [todayScreenshot?.storagePath]);
+
+  // Active preview image URL: local upload > resolved signed URL > streaming endpoint fallback
+  const activePreviewUrl =
+    localPreviewUrl ||
+    resolvedServerUrl ||
+    (todayScreenshot?.storagePath
+      ? `/api/screenshot-image?path=${encodeURIComponent(todayScreenshot.storagePath)}`
+      : null);
+
+  // Formatted recorded time
+  const displayTime =
+    submittedTime ||
+    (todayScreenshot?.uploadedAt
+      ? new Date(todayScreenshot.uploadedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : null);
 
   // Resize and compress screenshot image to max 1280px wide
   const compressImage = (file: File): Promise<Blob> => {
@@ -80,6 +121,10 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
     setScreenshotError(null);
     setScreenshotSuccess(null);
 
+    // Instant local preview
+    const localUrl = URL.createObjectURL(screenshotFile);
+    setLocalPreviewUrl(localUrl);
+
     try {
       const compressedBlob = await compressImage(screenshotFile);
       const compressedFile = new File([compressedBlob], screenshotFile.name, {
@@ -101,13 +146,49 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
       onRefresh();
     } catch (err: any) {
       const msg = err?.message || 'Failed to upload screenshot.';
-      if (msg.includes('already')) {
-        setScreenshotError("You already submitted today's screenshot.");
-      } else {
-        setScreenshotError(msg);
-      }
+      setScreenshotError(msg);
     } finally {
       setUploadingScreenshot(false);
+    }
+  };
+
+  const handleReplaceScreenshot = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploadingScreenshot(true);
+    setScreenshotError(null);
+    setScreenshotSuccess(null);
+
+    // Instant local preview
+    const localUrl = URL.createObjectURL(file);
+    setLocalPreviewUrl(localUrl);
+
+    try {
+      const compressedBlob = await compressImage(file);
+      const compressedFile = new File([compressedBlob], file.name, {
+        type: 'image/jpeg',
+      });
+
+      const uploadRes = await api.uploadFile(compressedFile, 'screenshot');
+      await api.uploadScreenshotRecord({
+        fileId: uploadRes.fileId,
+        fileName: uploadRes.originalName,
+        fileSize: uploadRes.size,
+      });
+
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      setSubmittedTime(timeStr);
+      setScreenshotSuccess(`Screenshot replaced at ${timeStr}.`);
+      onRefresh();
+    } catch (err: any) {
+      setScreenshotError(err?.message || 'Failed to replace screenshot.');
+    } finally {
+      setUploadingScreenshot(false);
+      if (replaceInputRef.current) {
+        replaceInputRef.current.value = '';
+      }
     }
   };
 
@@ -132,15 +213,15 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
       <div className="p-4 sm:p-5 rounded-2xl bg-[#F3F4F6] space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <Clock className="w-4 h-4 text-[#D4202C] shrink-0" />
-            <h3 className="font-bold text-sm sm:text-base text-[#111111] leading-tight">
-              Nightly screen-time verification
+            <Clock className="w-5 h-5 text-[#D4202C] shrink-0" />
+            <h3 className="font-bold text-base sm:text-lg text-[#111111] leading-tight">
+              Nightly Screen-Time Verification
             </h3>
           </div>
           {isSubmittedToday ? (
             <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white text-[#111111] border border-gray-200 text-xs font-semibold shrink-0">
               <Check className="w-3.5 h-3.5 text-[#D4202C] stroke-[3]" />
-              Submitted {submittedTime ? `at ${submittedTime}` : 'today'}
+              Submitted {displayTime ? `at ${displayTime}` : 'today'}
             </span>
           ) : (
             <span className="inline-flex items-center px-3 py-1 rounded-full bg-white text-[#6B7280] text-xs font-semibold shrink-0 border border-gray-200">
@@ -150,18 +231,81 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
         </div>
 
         <p className="text-[13px] text-[#6B7280] leading-relaxed">
-          Upload daily device screen-time verification. Admin review only; automatically purged after 48 hours.
+          Upload your daily device screen-time verification. Admin review only; automatically purged after 26 hours.
         </p>
 
-        {/* Hide file chooser for the rest of the day after successful upload */}
+        {/* When recorded, show card with image preview, time pill, and replace screenshot button matching image.png */}
         {isSubmittedToday ? (
-          <div className="p-3.5 rounded-xl bg-white text-xs text-[#111111] space-y-1">
-            <p className="font-semibold">
-              Today's screenshot is recorded.
-            </p>
-            <p className="text-[13px] text-[#6B7280]">
-              You have already submitted your verification for today. The submission box will reopen tomorrow.
-            </p>
+          <div className="p-4 sm:p-5 rounded-2xl bg-white border border-[#E5E7EB] shadow-2xs space-y-3.5">
+            <div>
+              <h4 className="font-bold text-sm sm:text-base text-[#111111]">
+                Today's Screenshot Is Recorded
+              </h4>
+              <p className="text-[13px] text-[#6B7280] mt-0.5">
+                Uploaded for today's daily log. Kept strictly private and auto-purged after 26 hours.
+              </p>
+            </div>
+
+            {/* Screenshot preview area */}
+            <div className="rounded-2xl border border-gray-200/70 overflow-hidden bg-gray-50 flex items-center justify-center max-h-56 sm:max-h-64 relative group">
+              {activePreviewUrl ? (
+                <img
+                  src={activePreviewUrl}
+                  alt="Today's screen-time verification"
+                  className="w-full max-h-56 sm:max-h-64 object-contain bg-black/5"
+                />
+              ) : (
+                <div className="p-8 text-center text-xs text-[#6B7280] flex flex-col items-center justify-center gap-2">
+                  <Clock className="w-6 h-6 text-gray-300 animate-pulse" />
+                  <span>Loading screenshot preview...</span>
+                </div>
+              )}
+            </div>
+
+            {/* Status pill & Replace screenshot button matching uploaded image */}
+            <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-[#D4202C] border border-red-100 text-xs font-semibold">
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  Uploaded screenshot{displayTime ? ` at ${displayTime}` : ''} • Recorded
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  ref={replaceInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleReplaceScreenshot}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => replaceInputRef.current?.click()}
+                  disabled={uploadingScreenshot}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white hover:bg-gray-50 active:bg-gray-100 text-[#111111] border border-[#E5E7EB] text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  title="Replace with another screenshot"
+                >
+                  {uploadingScreenshot ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D4202C]" />
+                  ) : (
+                    <RefreshCw className="w-3.5 h-3.5 text-[#111111]" />
+                  )}
+                  <span>{uploadingScreenshot ? 'Replacing...' : 'Replace screenshot'}</span>
+                </button>
+              </div>
+            </div>
+
+            {screenshotSuccess && (
+              <p className="text-xs text-emerald-700 font-medium bg-emerald-50 border border-emerald-100 rounded-lg p-2">
+                {screenshotSuccess}
+              </p>
+            )}
+            {screenshotError && (
+              <p className="text-xs text-[#D4202C] font-medium bg-red-50 border border-red-100 rounded-lg p-2">
+                {screenshotError}
+              </p>
+            )}
           </div>
         ) : (
           <form onSubmit={handleUploadScreenshot} className="space-y-3 pt-1">

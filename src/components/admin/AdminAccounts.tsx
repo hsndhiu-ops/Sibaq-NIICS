@@ -37,7 +37,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Filters & Search
-  const [roleFilter, setRoleFilter] = useState<'all' | 'guide' | 'student'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'admin' | 'guide' | 'student'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Active dropdown row ID
@@ -46,6 +46,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
 
   // Create account modal
   const [isCreating, setIsCreating] = useState(false);
+  const [createRole, setCreateRole] = useState<'student' | 'guide' | 'admin'>('student');
 
   // Reset password modal
   const [resetTargetUser, setResetTargetUser] = useState<User | null>(null);
@@ -304,7 +305,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
         <div>
           <h1 className="font-serif text-2xl sm:text-3xl text-[#111111]">Accounts</h1>
           <p className="text-xs sm:text-sm text-[#6B7280] mt-1">
-            Manage student and guide profiles, reset credentials, and control access
+            Manage administrator, supervisor guide, and student accounts, reset credentials, and control access
           </p>
         </div>
 
@@ -337,10 +338,27 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
             {isMultiSelectMode ? 'Cancel multi-select' : 'Multi-select students'}
           </button>
 
+          {/* Dedicated Add Admin button */}
+          <button
+            type="button"
+            onClick={() => {
+              setCreateRole('admin');
+              setIsCreating(true);
+            }}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gray-900 text-white text-xs sm:text-sm font-semibold hover:bg-black transition-colors cursor-pointer shadow-xs"
+            title="Add a new administrator account"
+          >
+            <ShieldAlert className="w-4 h-4 text-[#D4202C]" />
+            <span>Add Admin</span>
+          </button>
+
           {/* Create account button */}
           <button
             type="button"
-            onClick={() => setIsCreating(true)}
+            onClick={() => {
+              setCreateRole(roleFilter === 'admin' ? 'admin' : roleFilter === 'guide' ? 'guide' : 'student');
+              setIsCreating(true);
+            }}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#D4202C] text-white text-xs sm:text-sm font-semibold hover:bg-[#b01b24] transition-colors cursor-pointer shadow-xs"
           >
             <Plus className="w-4 h-4" />
@@ -387,8 +405,8 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
 
       {/* Filters & Search */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] rounded-xl self-start">
-          {(['all', 'guide', 'student'] as const).map((r) => (
+        <div className="flex items-center gap-1.5 p-1 bg-[#F3F4F6] rounded-xl self-start flex-wrap">
+          {(['all', 'admin', 'guide', 'student'] as const).map((r) => (
             <button
               key={r}
               onClick={() => setRoleFilter(r)}
@@ -440,6 +458,19 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
               ? 'No accounts match your search criteria.'
               : 'No accounts configured in this category.'}
           </p>
+          {roleFilter === 'admin' && !searchQuery && (
+            <button
+              type="button"
+              onClick={() => {
+                setCreateRole('admin');
+                setIsCreating(true);
+              }}
+              className="mt-3.5 px-4 py-2 rounded-xl bg-gray-900 text-white text-xs font-semibold hover:bg-black transition-colors flex items-center gap-1.5"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-[#D4202C]" />
+              <span>Add Admin Account</span>
+            </button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
@@ -657,6 +688,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
         onSuccess={loadAccounts}
         onNotify={onNotify}
         guides={accounts.filter((a) => a.role === 'guide')}
+        initialRole={createRole}
       />
 
       {/* --- MODAL 2: Reset Password Modal --- */}
@@ -689,13 +721,13 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
 
               <div>
                 <label className="block text-xs font-semibold text-[#111111] mb-1">
-                  New password (min. 6 characters)
+                  New password (min. 4 characters)
                 </label>
                 <input
                   type="password"
                   value={resetPasswordVal}
                   onChange={(e) => setResetPasswordVal(e.target.value)}
-                  placeholder="Enter new password"
+                  placeholder="Enter new password (min. 4 characters)"
                   required
                   className="w-full px-3 py-2 border border-[#E5E7EB] rounded-xl text-xs sm:text-sm text-[#111111] focus:outline-none focus:border-[#D4202C]"
                 />
@@ -711,7 +743,7 @@ export const AdminAccounts: React.FC<AdminAccountsProps> = ({ onNotify }) => {
                 </button>
                 <button
                   type="submit"
-                  disabled={resetSaving || resetPasswordVal.length < 6}
+                  disabled={resetSaving || resetPasswordVal.length < 4}
                   className="px-4 py-2 text-xs font-semibold bg-[#D4202C] text-white rounded-xl hover:bg-[#b01b24] disabled:opacity-50 cursor-pointer"
                 >
                   {resetSaving ? 'Saving...' : 'Save password'}

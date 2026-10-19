@@ -9,6 +9,7 @@ interface CreateUserModalProps {
   onSuccess: () => void;
   onNotify: (msg: string) => void;
   guides: User[];
+  initialRole?: 'student' | 'guide' | 'admin';
 }
 
 export const CreateUserModal: React.FC<CreateUserModalProps> = ({
@@ -17,8 +18,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
   onSuccess,
   onNotify,
   guides,
+  initialRole = 'student',
 }) => {
-  const [role, setRole] = useState<'student' | 'guide'>('student');
+  const [role, setRole] = useState<'student' | 'guide' | 'admin'>(initialRole);
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -27,10 +29,17 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  React.useEffect(() => {
+    if (isOpen) {
+      setRole(initialRole || 'student');
+      setErrorMessage(null);
+    }
+  }, [isOpen, initialRole]);
+
   if (!isOpen) return null;
 
   const resetForm = () => {
-    setRole('student');
+    setRole(initialRole || 'student');
     setFullName('');
     setUsername('');
     setPassword('');
@@ -68,9 +77,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
       return;
     }
 
-    // Password minimum length check (>= 6 chars)
-    if (password.length < 6) {
-      setErrorMessage('Password must be at least 6 characters long.');
+    // Password minimum length check (>= 4 chars)
+    if (password.length < 4) {
+      setErrorMessage('Password must be at least 4 characters.');
       return;
     }
 
@@ -121,10 +130,16 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
             </div>
             <div>
               <h3 id="create-user-modal-title" className="font-bold text-base text-[#111111]">
-                Create User Account
+                {role === 'admin'
+                  ? 'Create Administrator Account'
+                  : role === 'guide'
+                  ? 'Create Guide Account'
+                  : 'Create Student Account'}
               </h3>
               <p className="text-[13px] text-[#6B7280]">
-                Add student or supervisor guide
+                {role === 'admin'
+                  ? 'Provision full administrative system access'
+                  : 'Add student or supervisor guide'}
               </p>
             </div>
           </div>
@@ -159,14 +174,14 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
             <label className="block text-xs font-semibold text-[#111111] mb-1.5">
               Account Role
             </label>
-            <div className="grid grid-cols-2 gap-2 bg-[#F3F4F6] p-1 rounded-xl">
+            <div className="grid grid-cols-3 gap-1.5 bg-[#F3F4F6] p-1 rounded-xl">
               <button
                 type="button"
                 onClick={() => setRole('student')}
                 disabled={isSubmitting}
-                className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                className={`py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   role === 'student'
-                    ? 'bg-[#D4202C] text-white'
+                    ? 'bg-[#D4202C] text-white shadow-2xs'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
@@ -176,16 +191,38 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
                 type="button"
                 onClick={() => setRole('guide')}
                 disabled={isSubmitting}
-                className={`py-2 rounded-lg text-xs font-semibold transition-all ${
+                className={`py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                   role === 'guide'
-                    ? 'bg-[#D4202C] text-white'
+                    ? 'bg-[#D4202C] text-white shadow-2xs'
                     : 'text-[#6B7280] hover:text-[#111111]'
                 }`}
               >
                 Guide
               </button>
+              <button
+                type="button"
+                onClick={() => setRole('admin')}
+                disabled={isSubmitting}
+                className={`py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                  role === 'admin'
+                    ? 'bg-[#D4202C] text-white shadow-2xs'
+                    : 'text-[#6B7280] hover:text-[#111111]'
+                }`}
+              >
+                Admin
+              </button>
             </div>
           </div>
+
+          {/* Admin role badge/note */}
+          {role === 'admin' && (
+            <div className="p-3 rounded-xl bg-red-50/70 border border-red-100 text-xs text-[#111111] leading-relaxed flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-[#D4202C] shrink-0" />
+              <span>
+                <strong>Administrator Account:</strong> Grants full permissions to manage students, guides, programs, attendance logs, and create other admin accounts.
+              </span>
+            </div>
+          )}
 
           {/* Full name */}
           <div>
@@ -235,7 +272,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
                 Initial Password <span className="text-[#D4202C]">*</span>
               </label>
               <span className="text-xs text-[#6B7280]">
-                Min. 6 characters
+                Min. 4 characters
               </span>
             </div>
             <input
@@ -245,9 +282,9 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({
                 setPassword(e.target.value);
                 if (errorMessage) setErrorMessage(null);
               }}
-              placeholder="At least 6 characters"
+              placeholder="At least 4 characters"
               required
-              minLength={6}
+              minLength={4}
               disabled={isSubmitting}
               className="w-full px-3.5 py-2.5 rounded-xl bg-[#F3F4F6] text-sm text-[#111111] border border-transparent focus:border-[#D4202C] focus:bg-white outline-hidden transition-all disabled:opacity-60"
             />

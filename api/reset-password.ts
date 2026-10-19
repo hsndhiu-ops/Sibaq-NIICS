@@ -33,11 +33,13 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    if (newPassword.length < 6) {
+    if (newPassword.length < 4) {
       return res.status(400).json({
-        error: 'Password must be at least 6 characters long.',
+        error: 'Password must be at least 4 characters long.',
       });
     }
+
+    const authPassword = newPassword.length < 6 ? newPassword.padEnd(6, '_') : newPassword;
 
     // 3. Validate server environment variables
     const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
@@ -60,7 +62,7 @@ export default async function handler(req: any, res: any) {
 
     // 5. Update password via Supabase Auth Admin
     const { data, error } = await supabaseAdmin.auth.admin.updateUserById(userId, {
-      password: newPassword,
+      password: authPassword,
     });
 
     if (error) {

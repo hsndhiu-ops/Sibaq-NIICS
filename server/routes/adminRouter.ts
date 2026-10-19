@@ -584,10 +584,10 @@ router.get('/screenshots', (req, res) => {
   res.json({ screenshots: records, date });
 });
 
-// Trigger 48h purge
+// Trigger 26h purge
 router.delete('/purge-screenshots', (req, res) => {
   const purgedCount = db.purgeOldScreenshots();
-  res.json({ purgedCount, message: `Purged ${purgedCount} screenshots older than 48 hours.` });
+  res.json({ purgedCount, message: `Purged ${purgedCount} screenshots older than 26 hours.` });
 });
 
 export default router;

@@ -25,6 +25,7 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
   const [date, setDate] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [purging, setPurging] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Viewing modal state
@@ -41,7 +42,8 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
 
   // When a screenshot is selected, resolve its URL robustly
   useEffect(() => {
-    if (!selectedItem?.fileId) {
+    const raw = selectedItem?.fileId || selectedItem?.storagePath;
+    if (!raw) {
       setResolvedImageUrl(null);
       setImageLoading(false);
       setImageError(false);
@@ -49,7 +51,6 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
       return;
     }
 
-    const raw = selectedItem.fileId;
     setImageLoading(true);
     setImageError(false);
     setIsZoomed(false);
@@ -66,7 +67,7 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
       return;
     }
 
-    // Otherwise resolve via Supabase Storage signed URL
+    // Otherwise resolve via signed URL with fallback to reliable server proxy
     let cancelled = false;
     setIsResolving(true);
 
@@ -74,12 +75,12 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
       .resolveScreenshotUrl(raw)
       .then((url) => {
         if (!cancelled) {
-          setResolvedImageUrl(url);
+          setResolvedImageUrl(url || `/api/screenshot-image?path=${encodeURIComponent(raw)}`);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setResolvedImageUrl(`/api/files/download/${encodeURIComponent(raw)}`);
+          setResolvedImageUrl(`/api/screenshot-image?path=${encodeURIComponent(raw)}`);
         }
       })
       .finally(() => {
@@ -120,6 +121,38 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
     }
   };
 
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(null);
+
+  const handleDeleteScreenshot = async (item: ScreenshotRecord, e?: React.MouseEvent, force = false) => {
+    if (e) e.stopPropagation();
+    const rawPath = item.fileId || item.storagePath;
+
+    // Fast action confirmation without blocking window.confirm (works in iframes & all devices)
+    if (!force && confirmingDeleteId !== item.id) {
+      setConfirmingDeleteId(item.id);
+      setTimeout(() => {
+        setConfirmingDeleteId((prev) => (prev === item.id ? null : prev));
+      }, 4000);
+      return;
+    }
+
+    setConfirmingDeleteId(null);
+    setDeletingId(item.id);
+    try {
+      await api.deleteScreenshot(item.id, rawPath);
+      // Remove from active list immediately
+      setScreenshots((prev) => prev.filter((s) => s.id !== item.id));
+      if (selectedItem?.id === item.id) {
+        closeModal();
+      }
+      onNotify('Screenshot deleted successfully. Student may now resubmit.');
+    } catch (err: any) {
+      onNotify(err?.message || "Couldn't delete screenshot.");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const closeModal = () => {
     setSelectedItem(null);
     setResolvedImageUrl(null);
@@ -150,10 +183,10 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
             onClick={handleManualPurge}
             disabled={purging}
             className="px-3 py-1.5 rounded-xl bg-[#F3F4F6] text-xs font-semibold text-[#111111] hover:bg-gray-200 flex items-center gap-1.5"
-            title="Clean files older than 48 hours"
+            title="Clean files older than 26 hours"
           >
             <Trash2 className="w-3.5 h-3.5 text-[#D4202C]" />
-            <span>Purge &gt;48h</span>
+            <span>Purge &gt;26h</span>
           </button>
         </div>
       </div>
@@ -177,7 +210,8 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {screenshots.map((item) => {
-            const isPurged = item.status === 'purged' || !item.fileId;
+            const rawPath = item.fileId || item.storagePath;
+            const isPurged = item.status === 'purged' || Boolean(item.fileDeletedAt) || !rawPath;
             return (
               <div
                 key={item.id}
@@ -210,17 +244,37 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                   </div>
                 </div>
 
-                {!isPurged && item.fileId ? (
-                  <button
-                    onClick={() => setSelectedItem(item)}
-                    className="w-full py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
-                    <span>View screenshot</span>
-                  </button>
+                {!isPurged && rawPath ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setSelectedItem(item)}
+                      className="flex-1 py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
+                      <span>View screenshot</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteScreenshot(item, e)}
+                      disabled={deletingId === item.id}
+                      title={confirmingDeleteId === item.id ? "Click again to permanently delete" : "Delete screenshot"}
+                      className={`px-2.5 py-2 rounded-xl border text-xs font-semibold transition-all shrink-0 cursor-pointer disabled:opacity-50 flex items-center gap-1.5 ${
+                        confirmingDeleteId === item.id
+                          ? 'bg-[#D4202C] text-white border-[#D4202C]'
+                          : 'bg-white border-[#E5E7EB] text-[#6B7280] hover:text-[#D4202C] hover:bg-red-50'
+                      }`}
+                    >
+                      {deletingId === item.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D4202C]" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                      <span>{confirmingDeleteId === item.id ? 'Confirm?' : 'Delete'}</span>
+                    </button>
+                  </div>
                 ) : (
                   <div className="text-xs text-[#6B7280] italic p-2 bg-white rounded-xl text-center">
-                    Image file deleted per 48-hour privacy rule
+                    Image file deleted per 26-hour privacy rule
                   </div>
                 )}
               </div>
@@ -292,6 +346,24 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                     >
                       <Download className="w-4 h-4" />
                     </a>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteScreenshot(selectedItem)}
+                      disabled={deletingId === selectedItem.id}
+                      className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                        confirmingDeleteId === selectedItem.id
+                          ? 'bg-[#D4202C] text-white border-[#D4202C]'
+                          : 'bg-red-50 text-red-600 hover:bg-red-100 border-red-200'
+                      }`}
+                      title={confirmingDeleteId === selectedItem.id ? "Click again to delete permanently" : "Delete this screenshot"}
+                    >
+                      {deletingId === selectedItem.id ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                      <span>{confirmingDeleteId === selectedItem.id ? 'Confirm Delete?' : 'Delete'}</span>
+                    </button>
                   </>
                 )}
                 <button
@@ -329,7 +401,7 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                     </h4>
                     <p className="text-xs text-[#6B7280] mt-1 leading-relaxed">
                       The screenshot image could not be loaded. It may have been
-                      purged after the 48-hour privacy window, or the storage
+                      purged after the 26-hour privacy window, or the storage
                       link needs renewal.
                     </p>
                   </div>
@@ -337,11 +409,12 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                     <button
                       type="button"
                       onClick={() => {
-                        setImageError(false);
-                        setImageLoading(true);
-                        if (selectedItem?.fileId) {
-                          api.resolveScreenshotUrl(selectedItem.fileId).then((url) => {
-                            setResolvedImageUrl(url);
+                        const raw = selectedItem?.fileId || selectedItem?.storagePath;
+                        if (raw) {
+                          setImageError(false);
+                          setImageLoading(true);
+                          api.resolveScreenshotUrl(raw).then((url) => {
+                            setResolvedImageUrl(url || `/api/screenshot-image?path=${encodeURIComponent(raw)}`);
                           });
                         }
                       }}
@@ -367,8 +440,14 @@ export const AdminScreenshots: React.FC<AdminScreenshotsProps> = ({ onNotify }) 
                   alt={`Screen time for ${selectedItem.studentName || 'Student'} on ${selectedItem.date}`}
                   onLoad={() => setImageLoading(false)}
                   onError={() => {
-                    setImageLoading(false);
-                    setImageError(true);
+                    const raw = selectedItem?.fileId || selectedItem?.storagePath;
+                    const proxyUrl = raw ? `/api/screenshot-image?path=${encodeURIComponent(raw)}` : '';
+                    if (resolvedImageUrl && proxyUrl && resolvedImageUrl !== proxyUrl) {
+                      setResolvedImageUrl(proxyUrl);
+                    } else {
+                      setImageLoading(false);
+                      setImageError(true);
+                    }
                   }}
                   onClick={() => setIsZoomed(!isZoomed)}
                   className={`rounded-xl object-contain shadow-sm transition-all select-none ${

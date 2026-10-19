@@ -39,11 +39,13 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    if (password.length < 6) {
+    if (password.length < 4) {
       return res.status(400).json({
-        error: 'Password must be at least 6 characters long.',
+        error: 'Password must be at least 4 characters long.',
       });
     }
+
+    const authPassword = password.length < 6 ? password.padEnd(6, '_') : password;
 
     if (role !== 'student' && role !== 'guide' && role !== 'admin') {
       return res.status(400).json({
@@ -110,7 +112,7 @@ export default async function handler(req: any, res: any) {
     // 6. Create user in Supabase Auth via Admin API
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email: internalEmail,
-      password: password,
+      password: authPassword,
       email_confirm: true,
       user_metadata: {
         full_name: fullName,

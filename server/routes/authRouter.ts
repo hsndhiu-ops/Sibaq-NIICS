@@ -127,4 +127,31 @@ router.post('/update-profile', requireAuth, async (req: AuthenticatedRequest, re
   }
 });
 
+// Resolve candidate account usernames by username, full name, or email for login resilience
+router.post('/resolve-account', async (req, res) => {
+  const input = typeof req.body.input === 'string' ? req.body.input.trim() : '';
+  if (!input) return res.json({ candidateUsernames: [] });
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!supabaseUrl || !serviceRoleKey) {
+    return res.json({ candidateUsernames: [] });
+  }
+
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
+    const { data } = await supabaseAdmin
+      .from('profiles')
+      .select('username')
+      .or(`username.ilike.%${input}%,full_name.ilike.%${input}%,notification_email.ilike.%${input}%`)
+      .limit(5);
+
+    const candidateUsernames = (data || []).map((p: any) => p.username).filter(Boolean);
+    return res.json({ candidateUsernames });
+  } catch (e) {
+    return res.json({ candidateUsernames: [] });
+  }
+});
+
 export default router;

@@ -232,6 +232,7 @@ export interface StudentDashboardData {
   completedTasks: TaskRecord[];
   remarks: RemarkRecord[];
   hasUploadedScreenshotToday: boolean;
+  todayScreenshot?: { id: string; storagePath: string; uploadedAt?: string } | null;
   attendanceHistory: AttendanceRecord[];
 }
 

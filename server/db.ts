@@ -904,11 +904,11 @@ class Database {
   }
 
   /**
-   * Purges screenshots uploaded more than 48 hours ago.
+   * Purges screenshots uploaded more than 26 hours ago.
    * Deletes actual file from disk and updates record to status: 'purged'
    */
   public purgeOldScreenshots(): number {
-    const cutoffMs = 48 * 60 * 60 * 1000;
+    const cutoffMs = 26 * 60 * 60 * 1000;
     const nowMs = Date.now();
     let purgedCount = 0;
 

@@ -86,11 +86,11 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
     api
       .resolveScreenshotUrl(viewingScreenshotId)
       .then((url) => {
-        if (!cancelled) setResolvedScreenshotUrl(url);
+        if (!cancelled) setResolvedScreenshotUrl(url || `/api/screenshot-image?path=${encodeURIComponent(viewingScreenshotId)}`);
       })
       .catch(() => {
         if (!cancelled) {
-          setResolvedScreenshotUrl(`/api/files/download/${encodeURIComponent(viewingScreenshotId)}`);
+          setResolvedScreenshotUrl(`/api/screenshot-image?path=${encodeURIComponent(viewingScreenshotId)}`);
         }
       });
 
@@ -98,6 +98,41 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
       cancelled = true;
     };
   }, [viewingScreenshotId]);
+
+  const [deletingScreenshotId, setDeletingScreenshotId] = useState<string | null>(null);
+  const [confirmingScreenshotDeleteId, setConfirmingScreenshotDeleteId] = useState<string | null>(null);
+
+  const handleDeleteScreenshot = async (screenshotId: string, storagePath?: string | null, force = false) => {
+    if (!force && confirmingScreenshotDeleteId !== screenshotId) {
+      setConfirmingScreenshotDeleteId(screenshotId);
+      setTimeout(() => {
+        setConfirmingScreenshotDeleteId((prev) => (prev === screenshotId ? null : prev));
+      }, 4000);
+      return;
+    }
+
+    setConfirmingScreenshotDeleteId(null);
+    setDeletingScreenshotId(screenshotId);
+    try {
+      await api.deleteScreenshot(screenshotId, storagePath);
+      setData((prev) =>
+        prev
+          ? {
+              ...prev,
+              screenshots: prev.screenshots.filter((s) => s.id !== screenshotId),
+            }
+          : prev
+      );
+      if (viewingScreenshotId === storagePath || viewingScreenshotId === screenshotId) {
+        setViewingScreenshotId(null);
+      }
+      onNotify?.('Screenshot deleted successfully. Student may now resubmit.');
+    } catch (err: any) {
+      onNotify?.(err?.message || "Couldn't delete screenshot.");
+    } finally {
+      setDeletingScreenshotId(null);
+    }
+  };
 
   // Admin task review action state
   const [reviewTask, setReviewTask] = useState<TaskRecord | null>(null);
@@ -756,7 +791,8 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 sm:gap-2.5">
                 {screenshots.map((s) => {
-                  const isPurged = s.status === 'purged' || !s.fileId;
+                  const rawPath = s.fileId || s.storagePath;
+                  const isPurged = s.status === 'purged' || Boolean(s.fileDeletedAt) || !rawPath;
                   return (
                     <div
                       key={s.id}
@@ -781,17 +817,37 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                         </span>
                       </div>
 
-                      {!isPurged && (s.fileId || s.storagePath) ? (
-                        <button
-                          onClick={() => setViewingScreenshotId(s.fileId || s.storagePath || s.id)}
-                          className="w-full py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors"
-                        >
-                          <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
-                          <span>Review screenshot</span>
-                        </button>
+                      {!isPurged && rawPath ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => setViewingScreenshotId(rawPath)}
+                            className="flex-1 py-2 rounded-xl bg-white border border-[#E5E7EB] text-xs font-semibold text-[#111111] hover:bg-gray-100 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
+                            <span>Review screenshot</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteScreenshot(s.id, rawPath)}
+                            disabled={deletingScreenshotId === s.id}
+                            title={confirmingScreenshotDeleteId === s.id ? "Click again to delete" : "Delete screenshot"}
+                            className={`px-2.5 py-2 rounded-xl border text-xs font-semibold transition-all shrink-0 cursor-pointer disabled:opacity-50 flex items-center gap-1.5 ${
+                              confirmingScreenshotDeleteId === s.id
+                                ? 'bg-[#D4202C] text-white border-[#D4202C]'
+                                : 'bg-white border-[#E5E7EB] text-[#6B7280] hover:text-[#D4202C] hover:bg-red-50'
+                            }`}
+                          >
+                            {deletingScreenshotId === s.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#D4202C]" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                            <span>{confirmingScreenshotDeleteId === s.id ? 'Confirm?' : 'Delete'}</span>
+                          </button>
+                        </div>
                       ) : (
                         <div className="p-1.5 rounded-lg bg-white text-xs text-[#6B7280] text-center italic">
-                          File deleted per 48-hour privacy rule
+                          File deleted per 26-hour privacy rule
                         </div>
                       )}
                     </div>
@@ -873,6 +929,18 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                     >
                       <ExternalLink className="w-4 h-4" />
                     </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const s = screenshots.find((x) => x.fileId === viewingScreenshotId || x.storagePath === viewingScreenshotId || x.id === viewingScreenshotId);
+                        if (s) handleDeleteScreenshot(s.id, s.storagePath || s.fileId, true);
+                      }}
+                      className="px-2 py-1 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1"
+                      title="Delete this screenshot"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Screenshot</span>
+                    </button>
                   </>
                 )}
                 <button
@@ -904,7 +972,7 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                     </h4>
                     <p className="text-xs text-[#6B7280] mt-1 leading-relaxed">
                       Image could not be retrieved from storage. It may have been
-                      purged after the 48-hour privacy window.
+                      purged after the 26-hour privacy window.
                     </p>
                   </div>
                   {resolvedScreenshotUrl && (
@@ -924,8 +992,13 @@ export const AdminStudentDrillDown: React.FC<AdminStudentDrillDownProps> = ({
                   alt="Student screen time verification"
                   onLoad={() => setScreenshotLoading(false)}
                   onError={() => {
-                    setScreenshotLoading(false);
-                    setScreenshotError(true);
+                    const proxyUrl = viewingScreenshotId ? `/api/screenshot-image?path=${encodeURIComponent(viewingScreenshotId)}` : '';
+                    if (resolvedScreenshotUrl && proxyUrl && resolvedScreenshotUrl !== proxyUrl) {
+                      setResolvedScreenshotUrl(proxyUrl);
+                    } else {
+                      setScreenshotLoading(false);
+                      setScreenshotError(true);
+                    }
                   }}
                   onClick={() => setIsScreenshotZoomed(!isScreenshotZoomed)}
                   className={`rounded-xl object-contain shadow-sm transition-all select-none ${

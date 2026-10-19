@@ -227,6 +227,7 @@ export default function App() {
           programGuides={studentHomeData?.programGuides || []}
           allGuides={studentHomeData?.allGuides || []}
           hasUploadedScreenshotToday={studentHomeData?.hasUploadedScreenshotToday || false}
+          todayScreenshot={studentHomeData?.todayScreenshot || null}
           onRefresh={() => {
             loadStudentHomeData();
             showToast('Progress updated');

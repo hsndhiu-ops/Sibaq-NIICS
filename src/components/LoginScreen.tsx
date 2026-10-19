@@ -69,13 +69,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           </h2>
 
           <form onSubmit={handleLogin} className="space-y-4">
-            {/* Username field */}
+            {/* Username or Email field */}
             <div>
               <label
                 htmlFor="login-username"
                 className="block text-xs font-semibold text-[#111111] mb-1.5"
               >
-                Username
+                Username or Email
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-[#6B7280]">
@@ -86,7 +86,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
                   type="text"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Username"
+                  placeholder="Username or email address"
                   required
                   autoComplete="username"
                   className="w-full h-[48px] pl-11 pr-4 rounded-[10px] bg-[#F3F4F6] text-[#111111] text-sm sm:text-base border border-[#E5E7EB] focus:outline-none focus:ring-2 focus:ring-[#D4202C] transition-colors"

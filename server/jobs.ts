@@ -21,11 +21,45 @@ export function runNightlyScreenshotPromptJob() {
   }
 }
 
-export function runScreenshotPurgeJob() {
-  console.log('[JOB] Running 48-hour screenshot purge check');
+import { createClient } from '@supabase/supabase-js';
+
+export async function runScreenshotPurgeJob() {
+  console.log('[JOB] Running 26-hour screenshot purge check');
   const purgedCount = db.purgeOldScreenshots();
   if (purgedCount > 0) {
-    console.log(`[JOB] Purged ${purgedCount} screenshot files older than 48 hours.`);
+    console.log(`[JOB] Purged ${purgedCount} screenshot files older than 26 hours from local db.`);
+  }
+
+  // Also purge Supabase screenshots older than 26 hours
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (supabaseUrl && serviceRoleKey) {
+    try {
+      const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
+      const cutoffTime = new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString();
+      const { data: oldScreenshots } = await supabaseAdmin
+        .from('screenshot_log')
+        .select('id, storage_path')
+        .lt('uploaded_at', cutoffTime)
+        .is('file_deleted_at', null);
+
+      if (oldScreenshots && oldScreenshots.length > 0) {
+        const paths = oldScreenshots.map((s) => s.storage_path).filter(Boolean);
+        if (paths.length > 0) {
+          await supabaseAdmin.storage.from('screenshots').remove(paths);
+        }
+        await supabaseAdmin
+          .from('screenshot_log')
+          .update({ file_deleted_at: new Date().toISOString() })
+          .in('id', oldScreenshots.map((s) => s.id));
+        console.log(`[JOB] Purged ${oldScreenshots.length} screenshots older than 26 hours from Supabase storage.`);
+      }
+    } catch (err) {
+      console.warn('[JOB] Supabase screenshot purge job warning:', err);
+    }
   }
 }
 
