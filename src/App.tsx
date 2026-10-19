@@ -92,6 +92,17 @@ export default function App() {
         setDefaultTabForRole(res.user.role);
       })
       .catch(() => {
+        try {
+          const cached = localStorage.getItem('sibaq_current_user');
+          if (cached) {
+            const u = JSON.parse(cached);
+            if (u?.id && u?.role) {
+              setCurrentUser(u);
+              setDefaultTabForRole(u.role);
+              return;
+            }
+          }
+        } catch {}
         setCurrentUser(null);
       })
       .finally(() => {

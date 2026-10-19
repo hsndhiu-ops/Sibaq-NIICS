@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { AttendanceRecord, RemarkRecord, Program, StudentProgramGuidesGroup, StudentAssignedGuide } from '../../types';
 import { api } from '../../api';
-import { Check, Clock, Users, Mail, RefreshCw, Loader2 } from 'lucide-react';
+import { Check, Clock, Users, Mail, RefreshCw, Loader2, Eye, X, ExternalLink } from 'lucide-react';
 import { Pentagon } from '../brand/Decorations';
 
 interface StudentProgressProps {
@@ -32,6 +32,7 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
   const [submittedTime, setSubmittedTime] = useState<string | null>(null);
   const [localPreviewUrl, setLocalPreviewUrl] = useState<string | null>(null);
   const [resolvedServerUrl, setResolvedServerUrl] = useState<string | null>(null);
+  const [isViewingModalOpen, setIsViewingModalOpen] = useState(false);
 
   const replaceInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -246,23 +247,39 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
               </p>
             </div>
 
-            {/* Screenshot preview area */}
-            <div className="rounded-2xl border border-gray-200/70 overflow-hidden bg-gray-50 flex items-center justify-center max-h-56 sm:max-h-64 relative group">
+            {/* Compact half-image screenshot preview box matching design */}
+            <div
+              onClick={() => activePreviewUrl && setIsViewingModalOpen(true)}
+              className="h-28 sm:h-32 rounded-2xl border border-gray-200/80 overflow-hidden bg-gray-50 relative group cursor-pointer shadow-2xs transition-all hover:border-gray-300"
+              title="Click to view full screenshot"
+            >
               {activePreviewUrl ? (
-                <img
-                  src={activePreviewUrl}
-                  alt="Today's screen-time verification"
-                  className="w-full max-h-56 sm:max-h-64 object-contain bg-black/5"
-                />
+                <>
+                  <img
+                    src={activePreviewUrl}
+                    alt="Today's screen-time verification"
+                    className="w-full h-full object-cover object-top"
+                  />
+                  {/* Bottom overlay with preview indicator */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent flex items-end justify-between p-2.5 opacity-90 group-hover:opacity-100 transition-opacity">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/60 text-white text-[11px] font-semibold backdrop-blur-xs">
+                      <Eye className="w-3.5 h-3.5 text-white" />
+                      <span>Click to view full image</span>
+                    </span>
+                    <span className="text-[10px] text-white/90 font-medium bg-black/40 px-2 py-0.5 rounded backdrop-blur-xs">
+                      Preview
+                    </span>
+                  </div>
+                </>
               ) : (
-                <div className="p-8 text-center text-xs text-[#6B7280] flex flex-col items-center justify-center gap-2">
-                  <Clock className="w-6 h-6 text-gray-300 animate-pulse" />
+                <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 text-xs text-[#6B7280]">
+                  <Clock className="w-5 h-5 text-gray-300 animate-pulse" />
                   <span>Loading screenshot preview...</span>
                 </div>
               )}
             </div>
 
-            {/* Status pill & Replace screenshot button matching uploaded image */}
+            {/* Status pill & Action buttons (Preview + Replace screenshot) */}
             <div className="flex flex-wrap items-center justify-between gap-2.5 pt-1">
               <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-red-50 text-[#D4202C] border border-red-100 text-xs font-semibold">
                 <Clock className="w-3.5 h-3.5 shrink-0" />
@@ -272,6 +289,17 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsViewingModalOpen(true)}
+                  disabled={!activePreviewUrl}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-white hover:bg-gray-50 active:bg-gray-100 text-[#111111] border border-[#E5E7EB] text-xs font-semibold shadow-2xs transition-colors cursor-pointer disabled:opacity-50"
+                  title="View full screenshot image"
+                >
+                  <Eye className="w-3.5 h-3.5 text-[#D4202C]" />
+                  <span>Preview</span>
+                </button>
+
                 <input
                   ref={replaceInputRef}
                   type="file"
@@ -305,6 +333,59 @@ export const StudentProgress: React.FC<StudentProgressProps> = ({
               <p className="text-xs text-[#D4202C] font-medium bg-red-50 border border-red-100 rounded-lg p-2">
                 {screenshotError}
               </p>
+            )}
+
+            {/* Full-view Modal when clicking preview or preview button */}
+            {isViewingModalOpen && activePreviewUrl && (
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-3 sm:p-5 backdrop-blur-xs animate-in fade-in"
+                onClick={() => setIsViewingModalOpen(false)}
+              >
+                <div
+                  className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {/* Modal Header */}
+                  <div className="p-3.5 border-b border-[#F3F4F6] flex items-center justify-between gap-2 bg-white">
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-sm text-[#111111]">
+                        Nightly Screen-Time Verification
+                      </h4>
+                      <p className="text-xs text-[#6B7280]">
+                        {displayTime ? `Uploaded at ${displayTime}` : "Today's submission"} • Kept private and auto-purged after 26 hours
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <a
+                        href={activePreviewUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="p-1.5 rounded-lg text-[#6B7280] hover:text-[#111111] hover:bg-[#F3F4F6] transition-colors"
+                        title="Open full image in new tab"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </a>
+                      <button
+                        type="button"
+                        onClick={() => setIsViewingModalOpen(false)}
+                        className="p-1.5 rounded-lg bg-[#F3F4F6] text-[#111111] hover:bg-gray-200 transition-colors ml-1"
+                        title="Close"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Modal Body: Complete Image */}
+                  <div className="p-3 sm:p-4 flex-1 overflow-auto flex items-center justify-center bg-[#F9FAFB] min-h-[300px]">
+                    <img
+                      src={activePreviewUrl}
+                      alt="Screen-time full verification"
+                      className="max-h-[75vh] w-auto max-w-full object-contain rounded-xl shadow-xs"
+                    />
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         ) : (

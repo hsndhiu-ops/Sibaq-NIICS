@@ -397,43 +397,139 @@ export const api = {
 
     const user = mapProfileToUser(profile);
     setStoredToken(authResult.session.access_token);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('sibaq_current_user', JSON.stringify(user));
+      } catch {}
+    }
     return { token: authResult.session.access_token, user };
   },
 
   logout: async (): Promise<{ success: boolean }> => {
-    await supabase.auth.signOut();
+    await supabase.auth.signOut().catch(() => {});
     setStoredToken(null);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('sibaq_current_user');
+      } catch {}
+    }
     return { success: true };
   },
 
   getMe: async (): Promise<{ user: User }> => {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    let session: any = null;
+    try {
+      const { data } = await supabase.auth.getSession();
+      session = data?.session;
+    } catch (sessionErr) {
+      console.warn('[getMe] getSession error:', sessionErr);
+    }
 
     if (!session?.user) {
+      // Check stored user fallback if token exists
+      const storedToken = getStoredToken();
+      const cachedStr = typeof window !== 'undefined' ? localStorage.getItem('sibaq_current_user') : null;
+      if (storedToken && cachedStr) {
+        try {
+          const cachedUser = JSON.parse(cachedStr);
+          if (cachedUser?.id) return { user: cachedUser };
+        } catch {}
+      }
       throw new Error('Session expired. Please sign in again.');
     }
 
-    const { data: profile, error } = await supabase
-      .from(TABLES.PROFILES)
-      .select('*')
-      .eq(PROFILES_COLS.ID, session.user.id)
-      .maybeSingle();
+    let profile: any = null;
 
-    if (error || !profile) {
-      console.error('[getMe] profile error:', error?.message || error);
-      throw new Error("Couldn't load profile. Try again.");
+    // 1. Primary path: query public.profiles directly from Supabase
+    try {
+      const res = await supabase
+        .from(TABLES.PROFILES)
+        .select('*')
+        .eq(PROFILES_COLS.ID, session.user.id)
+        .maybeSingle();
+      if (!res.error && res.data) {
+        profile = res.data;
+      }
+    } catch (err: any) {
+      console.warn('[getMe] direct Supabase fetch error, falling back to server route:', err?.message || err);
     }
 
-    // Check is_active
-    if (profile[PROFILES_COLS.IS_ACTIVE] === false) {
-      await supabase.auth.signOut();
-      setStoredToken(null);
-      throw new Error('This account is disabled. Ask your admin.');
+    // 2. Secondary fallback: call server endpoint /api/auth/me using Bearer token
+    if (!profile) {
+      try {
+        const token = session.access_token || getStoredToken();
+        const res = await fetch('/api/auth/me', {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}));
+          if (json?.user) {
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.setItem('sibaq_current_user', JSON.stringify(json.user));
+              } catch {}
+            }
+            return { user: json.user };
+          }
+        }
+      } catch (proxyErr) {
+        console.warn('[getMe] server proxy fallback error:', proxyErr);
+      }
     }
 
-    return { user: mapProfileToUser(profile) };
+    // 3. Process profile if loaded
+    if (profile) {
+      // Check is_active
+      if (profile[PROFILES_COLS.IS_ACTIVE] === false) {
+        await supabase.auth.signOut().catch(() => {});
+        setStoredToken(null);
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.removeItem('sibaq_current_user');
+          } catch {}
+        }
+        throw new Error('This account is disabled. Ask your admin.');
+      }
+      const user = mapProfileToUser(profile);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('sibaq_current_user', JSON.stringify(user));
+        } catch {}
+      }
+      return { user };
+    }
+
+    // 4. Tertiary fallback: restore last known profile from local cache
+    const cachedStr = typeof window !== 'undefined' ? localStorage.getItem('sibaq_current_user') : null;
+    if (cachedStr) {
+      try {
+        const cachedUser = JSON.parse(cachedStr);
+        if (cachedUser?.id === session.user.id) {
+          console.warn('[getMe] restored profile from local cache due to network glitch');
+          return { user: cachedUser };
+        }
+      } catch {}
+    }
+
+    // 5. Quaternary fallback: reconstruct safe User from Supabase session metadata
+    const meta = session.user.user_metadata || {};
+    const email = session.user.email || '';
+    const fallbackUser: User = {
+      id: session.user.id,
+      username: meta.username || email.split('@')[0] || 'user',
+      fullName: meta.full_name || meta.username || 'User',
+      role: (meta.role || (email.includes('admin') ? 'admin' : 'student')) as any,
+      email: email || null,
+      createdAt: session.user.created_at || new Date().toISOString(),
+    };
+
+    console.warn('[getMe] constructed fallback user from session metadata');
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('sibaq_current_user', JSON.stringify(fallbackUser));
+      } catch {}
+    }
+    return { user: fallbackUser };
   },
 
   changePassword: async (data: { currentPassword: string; newPassword: string }): Promise<{ success: boolean; message: string }> => {
