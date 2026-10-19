@@ -15,6 +15,7 @@ import {
   LADDER_POINTS,
   LeaderboardEntry,
 } from '../src/types';
+import { sendPushNotificationToUser } from './pushService';
 
 export interface UploadedFileRecord {
   id: string;
@@ -829,6 +830,16 @@ class Database {
         `[EMAIL NOTIFICATION TO: ${user.email}] Subject: ${notification.title} | Content: ${notification.message}`
       );
     }
+
+    // Trigger Native Web Push Notification to user's devices
+    sendPushNotificationToUser(data.userId, {
+      title: data.title,
+      body: data.message,
+      url: '/',
+      tag: `notif-${data.type}`,
+    }).catch((err) => {
+      console.warn('[WebPush] Error dispatching push from db.createNotification:', err);
+    });
 
     this.save();
     return notification;

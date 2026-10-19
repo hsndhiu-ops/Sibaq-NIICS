@@ -877,6 +877,23 @@ export const api = {
       }
     }
 
+    // Dispatch native Web Push Notifications to all assigned students
+    fetch('/api/notifications/dispatch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
+      },
+      body: JSON.stringify({
+        recipients: data.studentIds,
+        title: 'New Task Assigned',
+        message: `${data.title.trim()}${data.dueDate ? ` (Due: ${data.dueDate})` : ''}`,
+        url: '/student',
+      }),
+    }).catch((err) => {
+      console.warn('[createGuideTask] Push dispatch warning:', err);
+    });
+
     return {
       success: true,
       message: `Created task for ${data.studentIds.length} ${data.studentIds.length === 1 ? 'student' : 'students'}.`,
@@ -1132,6 +1149,23 @@ export const api = {
       throw new Error(error.message || "Couldn't save remark. Try again.");
     }
 
+    // Dispatch native Web Push Notification to student for this remark
+    fetch('/api/notifications/dispatch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
+      },
+      body: JSON.stringify({
+        recipients: [data.studentId],
+        title: 'New Mentor Remark',
+        message: data.body.trim().slice(0, 160),
+        url: '/student',
+      }),
+    }).catch((err) => {
+      console.warn('[addRemark] Push dispatch warning:', err);
+    });
+
     return { success: true, message: 'Guidance remark added.' };
   },
 
@@ -1150,6 +1184,23 @@ export const api = {
       console.error('[sendReminder] error:', error.message || error);
       throw new Error(error.message || "Couldn't send reminder. Try again.");
     }
+
+    // Dispatch native Web Push Notification to student for this reminder
+    fetch('/api/notifications/dispatch', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
+      },
+      body: JSON.stringify({
+        recipients: [targetId],
+        title: 'Reminder from Mentor',
+        message: message || 'Reminder from your mentor.',
+        url: '/student',
+      }),
+    }).catch((err) => {
+      console.warn('[sendReminder] Push dispatch warning:', err);
+    });
 
     return { success: true, message: 'Reminder sent.' };
   },
@@ -1190,6 +1241,22 @@ export const api = {
         throw new Error(error.message || "Couldn't send notification. Try again.");
       }
       totalSent += typeof count === 'number' ? count : batch.length;
+
+      // Dispatch native Web Push Notifications to all recipients in batch
+      fetch('/api/notifications/dispatch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getStoredToken() ? { Authorization: `Bearer ${getStoredToken()}` } : {}),
+        },
+        body: JSON.stringify({
+          recipients: batch,
+          title: data.title?.trim() || 'DHIU Arts Fest',
+          message: data.message.trim(),
+        }),
+      }).catch((err) => {
+        console.warn('[sendNotification] Push dispatch warning:', err);
+      });
     }
 
     return {

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { AppNotification } from '../types';
-import { X, User, BookOpen } from 'lucide-react';
+import { X, User, BookOpen, Bell, BellRing, Smartphone, Check, Loader2 } from 'lucide-react';
 import { Pentagon } from './brand/Decorations';
+import { usePushNotifications } from '../hooks/usePushNotifications';
 
 interface NotificationsModalProps {
   isOpen: boolean;
@@ -16,7 +17,38 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   notifications,
   onMarkAllRead,
 }) => {
+  const {
+    isSupported,
+    permission,
+    isSubscribed,
+    loading: pushLoading,
+    subscribe: subscribePush,
+    unsubscribe: unsubscribePush,
+    sendTest: sendTestPush,
+  } = usePushNotifications();
+
+  const [testStatus, setTestStatus] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+
   if (!isOpen) return null;
+
+  const handleTestPush = async () => {
+    setTesting(true);
+    setTestStatus(null);
+    try {
+      const res = await sendTestPush();
+      if (res.success) {
+        setTestStatus('Test alert sent! Check your phone.');
+      } else {
+        setTestStatus(res.message || 'Failed to send test push.');
+      }
+    } catch {
+      setTestStatus('Failed to send test push.');
+    } finally {
+      setTesting(false);
+      setTimeout(() => setTestStatus(null), 4000);
+    }
+  };
 
   const formatDate = (dateStr: string) => {
     try {
@@ -70,6 +102,73 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Native Web Push Notification Banner */}
+        {isSupported && (
+          <div className="bg-[#FAF7F2] p-3.5 border-b border-[#E5E7EB] text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <div className={`p-1.5 rounded-lg ${isSubscribed ? 'bg-emerald-100 text-emerald-700' : 'bg-red-50 text-[#D4202C]'}`}>
+                  {isSubscribed ? <Smartphone className="w-4 h-4" /> : <BellRing className="w-4 h-4" />}
+                </div>
+                <div>
+                  <p className="font-bold text-[#111111]">
+                    {isSubscribed ? 'Mobile Push Alerts Active' : 'Enable Mobile Push Alerts'}
+                  </p>
+                  <p className="text-[11px] text-[#6B7280]">
+                    {isSubscribed
+                      ? 'Alerts pop up on your device even when closed'
+                      : 'Get WhatsApp-like alerts when backgrounded'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 shrink-0">
+                {isSubscribed ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleTestPush}
+                      disabled={testing}
+                      className="px-2.5 py-1.5 rounded-lg bg-white border border-[#E5E7EB] text-[#111111] hover:bg-gray-50 font-semibold text-[11px] cursor-pointer flex items-center gap-1"
+                      title="Send a sample push to this device"
+                    >
+                      {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : <Bell className="w-3 h-3" />}
+                      <span>Test</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => unsubscribePush()}
+                      disabled={pushLoading}
+                      className="text-[11px] text-[#6B7280] hover:text-[#D4202C] px-1 cursor-pointer"
+                    >
+                      Turn off
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => subscribePush()}
+                    disabled={pushLoading}
+                    className="px-3 py-1.5 rounded-lg bg-[#D4202C] text-white hover:bg-red-700 font-bold text-[11px] cursor-pointer flex items-center gap-1 shadow-2xs"
+                  >
+                    {pushLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                    <span>Enable</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {testStatus && (
+              <p className="mt-1.5 text-[11px] font-medium text-[#D4202C]">{testStatus}</p>
+            )}
+            {permission === 'denied' && (
+              <p className="mt-1.5 text-[11px] text-amber-700 bg-amber-50 p-1.5 rounded border border-amber-200">
+                Notifications are blocked in your browser. Tap site settings to allow notifications.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Content list */}
         <div className="p-4 overflow-y-auto space-y-3 flex-1">
